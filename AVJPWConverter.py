@@ -23,7 +23,7 @@ output_dir = input("请输入输出目录的路径: ")
 output_format = input("请输入输出的图片格式（png， jpg, webp 或 avif）: ").lower()
 
 if output_format == 'jpg':
-    quality = int(input("请输入 JPEG 质量 (1-100，默认值为 75): ") or "90")
+    quality = int(input("请输入 JPEG 质量 (1-100，默认值为 90): ") or "90")
 elif output_format == 'png':
     compress_level = int(input("请输入 PNG 压缩级别 (0-9，默认值为 6): ") or "6")
 elif output_format == 'webp':

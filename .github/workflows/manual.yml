@@ -38,10 +38,10 @@ jobs:
       
     - name: 压缩EXE文件
       shell: pwsh
-      run: upx --best .\AVJPWConverter.exe
+      run: upx --best .\AVJPWConverter.dist\AVJPWConverter.exe
 
     - name: 上传EXE文件
       uses: actions/upload-artifact@v3
       with:
         name: AVJPWConverter-EXE
-        path: ./AVJPWConverter.exe
+        path: ./AVJPWConverter.dist/AVJPWConverter.exe

@@ -16,12 +16,16 @@ jobs:
       with:
         python-version: 3.8
         
-    - name: 安装依赖
+    - name: 安装依赖并输出nuitka路径
       run: |
         python -m pip install --upgrade pip
         pip install pillow
-        python -m pip install nuitka       
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
+        python -m pip install nuitka  
+        # 输出 nuitka 的路径
+        echo $(python -m site --user-base)/bin
+
+- name: 使用全路径运行nuitka
+  run: $(python -m site --user-base)/bin/nuitka --version
 
     - name: 检查nuitka的安装情况
       run: nuitka --version

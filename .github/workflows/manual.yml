@@ -22,17 +22,14 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install pillow
-        pip install pillow_avif
+        pip install pillow-avif-plugin
         python -m pip install nuitka  
         
     - name: 安装upx
       run: choco install upx
 
     - name: 编译EXE文件
-      env:
-        NUITKA_DOWNLOADS_DEPENDENCY_WALKER: yes
-      run: |
-        python -m nuitka --standalone --follow-imports AVJPWConverter.py
+      run: nuitka --follow-imports AVJPWConverter.py
 
     - name: 压缩EXE文件
       shell: pwsh

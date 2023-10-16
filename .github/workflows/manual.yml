@@ -20,7 +20,11 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install pillow
-        python -m pip install nuitka
+        python -m pip install nuitka       
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: 检查nuitka的安装情况
+      run: nuitka --version
         
     - name: 安装upx
       run: sudo apt-get install -y upx-ucl

@@ -27,12 +27,9 @@ jobs:
         
     - name: 安装upx
       run: choco install upx
-
-    - name: Set PYTHONIOENCODING environment variable
-      run: echo "PYTHONIOENCODING=utf-8" >> $GITHUB_ENV
       
     - name: 编译EXE文件
-      run: nuitka --follow-imports --include-module=encodings AVJPWConverter.py
+      run: nuitka --standalone --follow-imports AVJPWConverter.py
 
     - name: 压缩EXE文件
       shell: pwsh

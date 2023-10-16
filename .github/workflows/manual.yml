@@ -29,8 +29,12 @@ jobs:
       run: choco install upx
       
     - name: 编译EXE文件
-      run: nuitka --standalone --follow-imports AVJPWConverter.py
-
+      run: |
+        echo Yes | nuitka --standalone --follow-imports AVJPWConverter.py
+      
+    - name: 列出当前目录的文件列表
+      run: ls -la
+      
     - name: 压缩EXE文件
       shell: pwsh
       run: upx --best .\AVJPWConverter.exe

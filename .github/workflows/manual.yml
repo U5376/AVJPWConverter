@@ -33,7 +33,8 @@ jobs:
         echo Yes | nuitka --standalone --follow-imports AVJPWConverter.py
       
     - name: 列出当前目录的文件列表
-      run: ls -la
+      shell: pwsh
+      run: Get-ChildItem -Force
       
     - name: 压缩EXE文件
       shell: pwsh

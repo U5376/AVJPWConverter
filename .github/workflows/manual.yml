@@ -1,7 +1,7 @@
 name: 构建和压缩EXE文件
 
 on:
-  push:
+  workflow_dispatch:
 
 jobs:
   build:
@@ -21,10 +21,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install pillow
         pip install nuitka
-        pip install upx
+        
+    - name: 安装upx
+      run: sudo apt-get install -y upx-ucl
         
     - name: 编译EXE文件
-      run: nuitka --follow-imports --windows-disable-console AVJPWConverter.py
+      run: nuitka --follow-imports AVJPWConverter.py
       
     - name: 压缩EXE文件
       run: upx --best AVJPWConverter.dist/AVJPWConverter.exe

@@ -32,8 +32,7 @@ jobs:
 
     - name: 编译EXE文件
       run: |
-        python -m nuitka --follow-imports AVJPWConverter.py
-        dir
+        python -m nuitka --standalone --follow-imports AVJPWConverter.py
 
     - name: 压缩EXE文件
       shell: pwsh

@@ -18,19 +18,19 @@ jobs:
       with:
         python-version: 3.8
 
-    - name: 安装依赖并输出nuitka路径
+    - name: 安装依赖
       run: |
         python -m pip install --upgrade pip
         pip install pillow
+        pip install pillow_avif
         python -m pip install nuitka  
-
-    - name: 检查nuitka的安装情况
-      run: python -m nuitka --version
         
     - name: 安装upx
       run: choco install upx
 
     - name: 编译EXE文件
+      env:
+        NUITKA_DOWNLOADS_DEPENDENCY_WALKER: yes
       run: |
         python -m nuitka --standalone --follow-imports AVJPWConverter.py
 

@@ -1,4 +1,4 @@
-name: UIpy构建和压缩EXE文件
+name: UI版exe构建
 
 on:
   workflow_dispatch:
@@ -37,5 +37,5 @@ jobs:
     - name: 上传EXE文件
       uses: actions/upload-artifact@v3
       with:
-        name: AVJPWConverter-EXE
-        path: ./AVJPWConverter.exe
+        name: AVJPWConverterUI-exe
+        path: ./AVJPWConverterUI.exe

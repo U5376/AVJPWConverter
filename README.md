@@ -10,4 +10,4 @@ PNG可选压缩等级1-9.
 
 AVIF可选质量1-63（AV1设计决定可选范围）
 
-用nuitka编译成C语言（20MB的exe文件）经过upx压缩最终大小5MB的可独立运行exe文件
+用nuitka编译成C语言构建成单exe 过程Actions有

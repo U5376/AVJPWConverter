@@ -18,13 +18,13 @@ jobs:
       with:
         python-version: 3.8
 
-  - name: 安装依赖
-    run: |
-      python -m pip install --upgrade pip
-      pip install pillow
-      pip install pillow-avif-plugin
-      pip install PySimpleGUI==4.60.5
-      python -m pip install nuitka
+    - name: 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install pillow
+        pip install pillow-avif-plugin
+        pip install PySimpleGUI==4.60.5 # 指定旧版不弹窗不收费 5需要收费了
+        python -m pip install nuitka
       
     - name: 编译EXE文件
       run: |

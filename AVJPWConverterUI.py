@@ -6,9 +6,6 @@ from tkinter import filedialog
 from PIL import Image
 import pillow_avif
 import PySimpleGUI as sg
-import logging
-
-logging.basicConfig(filename='debug.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
 # 设置UI界面的字体为宋体
 sg.set_options(font=("宋体", 12))

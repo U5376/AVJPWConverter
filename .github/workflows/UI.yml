@@ -23,7 +23,7 @@ jobs:
       python -m pip install --upgrade pip
       pip install pillow
       pip install pillow-avif-plugin
-      pip install PySimpleGUI==4.60  # 指定特定版本
+      pip install PySimpleGUI==4.60
       python -m pip install nuitka
       
     - name: 编译EXE文件

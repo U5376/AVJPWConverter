@@ -34,7 +34,7 @@ jobs:
     - name: 解压Dependency Walker
       run: |
         mkdir depends
-        cp /mnt/data/extracted_files_2/* ./depends/
+        cp /mnt/data/extracted_files_3/* ./depends/
 
     - name: 检查Dependency Walker是否存在
       shell: pwsh

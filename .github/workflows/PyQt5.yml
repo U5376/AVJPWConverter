@@ -28,7 +28,7 @@ jobs:
 
     - name: 编译EXE文件
       run: |
-        echo Yes | nuitka --standalone --follow-imports --onefile --enable-plugin=PyQt5 --windows-console-mode=disable AVJPWConverterPyQt5.py
+        echo Yes | nuitka --standalone --follow-imports --onefile --enable-plugin=pyqt5 --windows-console-mode=disable AVJPWConverterPyQt5.py
 
     - name: 列出当前目录的文件列表
       shell: pwsh

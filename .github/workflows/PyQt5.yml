@@ -14,7 +14,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: 设置Python环境
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: 3.8
 
@@ -24,35 +24,11 @@ jobs:
         pip install pillow
         pip install pillow-avif-plugin
         pip install PyQt5
-        pip install PyQt5-sip
         python -m pip install nuitka
-
-    - name: 安装 MinGW64
-      run: |
-        choco install mingw
-
-    - name: 设置 MinGW64 编译器路径
-      run: |
-        $env:Path += ";C:\Program Files\mingw-w64\x86_64-8.1.0-posix-seh-rt_v6-rev0\mingw64\bin"
 
     - name: 编译EXE文件
       run: |
-        $ConfirmPreference = 'None'
-        $command = 'nuitka --standalone --onefile --enable-plugin=pyqt5 --windows-console-mode=disable AVJPWConverterPyQt5.py --output-dir=./dist'
-        $proc = Start-Process -FilePath cmd.exe -ArgumentList "/c echo Y | $command" -NoNewWindow -PassThru -Wait
-        while ($true) {
-            $output = $proc.StandardOutput.ReadLine()
-            if ($output -match 'Proceed and download\? \[Yes\]\/No') {
-                $proc.StandardInput.WriteLine('Yes')
-            }
-            if ($proc.HasExited) { break }
-        }
-
-    - name: 列出dist目录的文件
-      shell: pwsh
-      run: |
-        Write-Output "Checking contents of ./dist"
-        Get-ChildItem -Path ./dist
+        echo Yes | nuitka --standalone --follow-imports --onefile --enable-plugin=PyQt5 --windows-console-mode=disable AVJPWConverterPyQt5.py
 
     - name: 列出当前目录的文件列表
       shell: pwsh
@@ -62,4 +38,4 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: AVJPWConverterPyQt5-exe
-        path: ./dist/AVJPWConverterPyQt5.exe
+        path: ./AVJPWConverterPyQt5.exe

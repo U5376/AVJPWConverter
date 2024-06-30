@@ -26,14 +26,13 @@ jobs:
         pip install PyQt5
         pip install PyQt5-sip
         python -m pip install nuitka
-      
+
     - name: 编译EXE文件
       run: |
-        # 设置QT_QPA_PLATFORM_PLUGIN_PATH环境变量
-        $env:QT_QPA_PLATFORM_PLUGIN_PATH = "$env:VIRTUAL_ENV/Lib/site-packages/PyQt5/Qt/plugins/platforms"
-        
-        # 使用命令行选项自动确认编译
-        nuitka --standalone --follow-imports --onefile --enable-plugin=tk-inter --windows-disable-console AVJPWConverterPyQt5.py --output-dir=./dist
+        # 设置QT_QPA_PLATFORM_PLUGIN_PATH环境变量（如果需要）
+        # $env:QT_QPA_PLATFORM_PLUGIN_PATH = "$env:VIRTUAL_ENV/Lib/site-packages/PyQt5/Qt/plugins/platforms"
+
+        nuitka --standalone --onefile --enable-plugin=tk-inter --windows-console-mode=disable AVJPWConverterPyQt5.py --output-dir=./dist
 
     - name: 下载并解压Dependency Walker
       run: |

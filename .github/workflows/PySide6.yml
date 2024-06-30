@@ -28,7 +28,7 @@ jobs:
 
     - name: 编译EXE文件
       run: |
-        echo Yes | nuitka --standalone --follow-imports --onefile  --windows-console-mode=disable AVJPWConverterPySide6.py
+        echo Yes | nuitka --standalone --follow-imports --onefile --enable-plugin=pyside6 --windows-console-mode=disable AVJPWConverterPySide6.py
       
     - name: 列出当前目录的文件列表
       shell: pwsh

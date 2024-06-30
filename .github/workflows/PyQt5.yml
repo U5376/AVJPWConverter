@@ -27,11 +27,6 @@ jobs:
         pip install PyQt5-sip
         python -m pip install nuitka
 
-    - name: 下载并解压Dependency Walker
-      run: |
-        curl -L -o depends.zip http://dependencywalker.com/depends22_x64.zip
-        Expand-Archive -Path depends.zip -DestinationPath ./depends
-
     - name: 安装 MinGW64
       run: |
         choco install mingw
@@ -42,7 +37,7 @@ jobs:
 
     - name: 编译EXE文件
       run: |
-        echo "Y" | nuitka --standalone --onefile --enable-plugin=pyqt5 --windows-console-mode=disable AVJPWConverterPyQt5.py --output-dir=./dist
+        yes | nuitka --standalone --onefile --enable-plugin=pyqt5 --windows-console-mode=disable AVJPWConverterPyQt5.py --output-dir=./dist
 
     - name: 列出dist目录的文件
       shell: pwsh

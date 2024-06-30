@@ -11,7 +11,7 @@ jobs:
     steps:
 
     - name: 检出代码
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: 设置Python环境
       uses: actions/setup-python@v4
@@ -29,7 +29,7 @@ jobs:
       
     - name: 编译EXE文件
       run: |
-        echo Yes | nuitka --standalone --follow-imports --onefile --enable-plugin=tk-inter --windows-disable-console AVJPWConverter PyQt5.py
+        echo Yes | nuitka --standalone --follow-imports --onefile --enable-plugin=tk-inter --windows-disable-console AVJPWConverterPyQt5.py
       
     - name: 列出当前目录的文件列表
       shell: pwsh

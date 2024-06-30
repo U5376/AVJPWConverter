@@ -16,7 +16,7 @@ jobs:
     - name: 设置Python环境
       uses: actions/setup-python@v4
       with:
-        python-version: 3.12
+        python-version: 3.8
 
     - name: 安装Microsoft Visual C++构建工具
       run: |
@@ -33,7 +33,7 @@ jobs:
 
     - name: 下载并解压Dependency Walker
       run: |
-        curl -L -o depends.zip http://www.dependencywalker.com/depends22_x64.zip
+        curl -L -o depends.zip http://dependencywalker.com/depends22_x64.zip
         Expand-Archive -Path depends.zip -DestinationPath ./depends
 
     - name: 检查Dependency Walker是否存在

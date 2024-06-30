@@ -16,7 +16,7 @@ jobs:
     - name: 设置Python环境
       uses: actions/setup-python@v4
       with:
-        python-version: 3.12
+        python-version: 3.8
 
     - name: 安装Microsoft Visual C++构建工具
       run: |
@@ -33,21 +33,13 @@ jobs:
 
     - name: 编译EXE文件
       run: |
-        echo "Y" | nuitka --standalone --onefile --enable-plugin=tk-inter --windows-console-mode=disable AVJPWConverterPyQt5.py --output-dir=./dist
+        echo "Y" | nuitka --standalone --onefile --windows-console-mode=disable AVJPWConverterPyQt5.py --output-dir=./dist
 
     - name: 列出dist目录的文件
       shell: pwsh
       run: |
         Write-Output "Checking contents of ./dist"
         Get-ChildItem -Path ./dist
-
-    - name: 确认生成文件
-      run: |
-        if (Test-Path -Path ./dist/AVJPWConverterPyQt5.exe) {
-          Write-Output "File exists."
-        } else {
-          Write-Error "File not found."
-        }
 
     - name: 列出当前目录的文件列表
       shell: pwsh

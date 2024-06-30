@@ -37,7 +37,7 @@ jobs:
 
     - name: 编译EXE文件
       run: |
-        yes | nuitka --standalone --onefile --enable-plugin=pyqt5 --windows-console-mode=disable AVJPWConverterPyQt5.py --output-dir=./dist
+        powershell -command "Start-Process -NoNewWindow -FilePath nuitka -ArgumentList '--standalone', '--onefile', '--enable-plugin=pyqt5', '--windows-console-mode=disable', 'AVJPWConverterPyQt5.py', '--output-dir=./dist' -Wait -NoNewWindow -PassThru | ForEach-Object { $_.StandardInput.WriteLine('Y') }"
 
     - name: 列出dist目录的文件
       shell: pwsh

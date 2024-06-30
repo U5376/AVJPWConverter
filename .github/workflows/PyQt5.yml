@@ -35,19 +35,18 @@ jobs:
       run: |
         $env:Path += ";C:\Program Files\mingw-w64\x86_64-8.1.0-posix-seh-rt_v6-rev0\mingw64\bin"
 
-    - name: 安装Expect工具
-      run: |
-        choco install expect
-
     - name: 编译EXE文件
       run: |
-        expect -c "
-        spawn nuitka --standalone --onefile --enable-plugin=pyqt5 --windows-console-mode=disable AVJPWConverterPyQt5.py --output-dir=./dist
-        expect {
-          \"*download?*\" { send \"yes\r\"; exp_continue }
-          eof
+        $ConfirmPreference = 'None'
+        $command = 'nuitka --standalone --onefile --enable-plugin=pyqt5 --windows-console-mode=disable AVJPWConverterPyQt5.py --output-dir=./dist'
+        $proc = Start-Process -FilePath cmd.exe -ArgumentList "/c echo Y | $command" -NoNewWindow -PassThru -Wait
+        while ($true) {
+            $output = $proc.StandardOutput.ReadLine()
+            if ($output -match 'Proceed and download\? \[Yes\]\/No') {
+                $proc.StandardInput.WriteLine('Yes')
+            }
+            if ($proc.HasExited) { break }
         }
-        "
 
     - name: 列出dist目录的文件
       shell: pwsh

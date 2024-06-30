@@ -32,17 +32,17 @@ jobs:
         # 设置QT_QPA_PLATFORM_PLUGIN_PATH环境变量
         $env:QT_QPA_PLATFORM_PLUGIN_PATH = "$env:VIRTUAL_ENV/Lib/site-packages/PyQt5/Qt/plugins/platforms"
         
-        # 确保平台插件被包含
-        echo Yes | nuitka --standalone --follow-imports --onefile --enable-plugin=tk-inter --windows-disable-console AVJPWConverterPyQt5.py
-      
-    - name: 下载Dependency Walker
+        # 使用命令行选项自动确认编译
+        nuitka --standalone --follow-imports --onefile --enable-plugin=tk-inter --windows-disable-console AVJPWConverterPyQt5.py --output-dir=./dist
+
+    - name: 下载并解压Dependency Walker
       run: |
         curl -L -o depends.zip http://www.dependencywalker.com/depends22_x64.zip
-        tar -xf depends.zip --one-top-level=depends --strip-components 1
+        Expand-Archive -Path depends.zip -DestinationPath ./depends
 
     - name: 运行Dependency Walker
       run: |
-        .\depends\depends.exe /c /f:1 /ot:dependencies.txt .\AVJPWConverterPyQt5.exe
+        ./depends/depends.exe /c /f:1 /ot:dependencies.txt ./dist/AVJPWConverterPyQt5.exe
 
     - name: 列出当前目录的文件列表
       shell: pwsh
@@ -52,7 +52,8 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: AVJPWConverterPyQt5-exe
-        path: ./AVJPWConverterPyQt5.exe
+        path: ./dist/AVJPWConverterPyQt5.exe
+
     - name: 上传Dependency Walker输出
       uses: actions/upload-artifact@v4
       with:

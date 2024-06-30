@@ -6,7 +6,7 @@ on:
 jobs:
   build:
 
-    runs-on: windows-latest
+    runs-on: windows-2019
 
     steps:
 
@@ -31,15 +31,6 @@ jobs:
         pip install PyQt5-sip
         python -m pip install nuitka
 
-    - name: 解压Dependency Walker
-      run: |
-        mkdir depends
-        cp /mnt/data/extracted_files_3/* ./depends/
-
-    - name: 检查Dependency Walker是否存在
-      shell: pwsh
-      run: Get-ChildItem -Path ./depends
-
     - name: 编译EXE文件
       run: |
         echo "Y" | nuitka --standalone --onefile --enable-plugin=tk-inter --windows-console-mode=disable AVJPWConverterPyQt5.py --output-dir=./dist
@@ -58,22 +49,12 @@ jobs:
           Write-Error "File not found."
         }
 
-    - name: 运行Dependency Walker检查EXE文件
-      run: |
-        ./depends/depends.exe /c /f:1 /ot:dependencies.txt ./dist/AVJPWConverterPyQt5.exe
-
     - name: 列出当前目录的文件列表
       shell: pwsh
       run: Get-ChildItem -Force
 
-    - name: 上传EXE文件和依赖项分析结果
+    - name: 上传EXE文件
       uses: actions/upload-artifact@v4
       with:
         name: AVJPWConverterPyQt5-exe
         path: ./dist/AVJPWConverterPyQt5.exe
-
-    - name: 上传Dependency Walker输出
-      uses: actions/upload-artifact@v4
-      with:
-        name: dependency-analysis
-        path: ./dependencies.txt

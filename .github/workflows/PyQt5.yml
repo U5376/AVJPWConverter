@@ -5,34 +5,44 @@ on:
 
 jobs:
   build:
+
     runs-on: windows-2019
 
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
 
-      - name: 设置Python环境
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.8  # 与 Nuitka 使用的版本一致
+    - name: 检出代码
+      uses: actions/checkout@v4
 
-      - name: 安装 Nuitka
-        run: pip install nuitka
+    - name: 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.8
 
-      - name: 安装 Dependency Walker
-        run: |
-          Invoke-WebRequest -Uri https://dependencywalker.com/depends22_x64.zip -OutFile depends22_x64.zip
-          Expand-Archive -Path depends22_x64.zip -DestinationPath $env:APPDATA\Nuitka\Cache\DOWNLO~1\depends
+    - name: 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install pillow
+        pip install pillow-avif-plugin
+        pip install PyQt5
+        pip install PyQt5-sip
+        python -m pip install nuitka
 
-      - name: 构建 PyQt5 应用
-        run: |
-          echo "Y" | nuitka --standalone --onefile --enable-plugin=pyqt5 --windows-console-mode=disable AVJPWConverterPyQt5.py --output-dir=./dist
+    - name: 编译EXE文件
+      run: |
+        echo "Y" | nuitka --standalone --onefile --enable-plugin=pyqt5 --windows-console-mode=disable AVJPWConverterPyQt5.py --output-dir=./dist
 
-      - name: 检查 dist 目录内容
-        run: Get-ChildItem -Path ./dist -Force
+    - name: 列出dist目录的文件
+      shell: pwsh
+      run: |
+        Write-Output "Checking contents of ./dist"
+        Get-ChildItem -Path ./dist
 
-      - name: 上传 artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: built-exe
-          path: ./dist/*.exe
+    - name: 列出当前目录的文件列表
+      shell: pwsh
+      run: Get-ChildItem -Force
+
+    - name: 上传EXE文件
+      uses: actions/upload-artifact@v4
+      with:
+        name: AVJPWConverterPyQt5-exe
+        path: ./dist/AVJPWConverterPyQt5.exe

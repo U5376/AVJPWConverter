@@ -16,7 +16,7 @@ jobs:
     - name: 设置Python环境
       uses: actions/setup-python@v4
       with:
-        python-version: 3.8
+        python-version: 3.12
 
     - name: 安装Microsoft Visual C++构建工具
       run: |
@@ -31,10 +31,10 @@ jobs:
         pip install PyQt5-sip
         python -m pip install nuitka
 
-    - name: 下载并解压Dependency Walker
+    - name: 解压Dependency Walker
       run: |
-        curl -L -o depends.zip http://dependencywalker.com/depends22_x64.zip
-        Expand-Archive -Path depends.zip -DestinationPath ./depends
+        mkdir depends
+        cp /mnt/data/extracted_files_2/* ./depends/
 
     - name: 检查Dependency Walker是否存在
       shell: pwsh

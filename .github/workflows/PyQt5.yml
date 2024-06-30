@@ -42,15 +42,25 @@ jobs:
 
     - name: 编译EXE文件
       run: |
-        nuitka --standalone --onefile --enable-plugin=tk-inter --windows-console-mode=disable AVJPWConverterPyQt5.py --output-dir=./dist
+        echo "Y" | nuitka --standalone --onefile --enable-plugin=tk-inter --windows-console-mode=disable AVJPWConverterPyQt5.py --output-dir=./dist
 
     - name: 列出dist目录的文件
       shell: pwsh
-      run: Get-ChildItem -Path ./dist
-
-    - name: 运行Dependency Walker检查根目录下的EXE文件
       run: |
-        ./depends/depends.exe /c /f:1 /ot:dependencies.txt ./AVJPWConverterPyQt5.exe
+        Write-Output "Checking contents of ./dist"
+        Get-ChildItem -Path ./dist
+
+    - name: 确认生成文件
+      run: |
+        if (Test-Path -Path ./dist/AVJPWConverterPyQt5.exe) {
+          Write-Output "File exists."
+        } else {
+          Write-Error "File not found."
+        }
+
+    - name: 运行Dependency Walker检查EXE文件
+      run: |
+        ./depends/depends.exe /c /f:1 /ot:dependencies.txt ./dist/AVJPWConverterPyQt5.exe
 
     - name: 列出当前目录的文件列表
       shell: pwsh

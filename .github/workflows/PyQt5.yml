@@ -18,6 +18,10 @@ jobs:
       with:
         python-version: 3.12
 
+    - name: 安装Microsoft Visual C++构建工具
+      run: |
+        choco install visualstudio2019buildtools --params "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --quiet"
+
     - name: 安装依赖
       run: |
         python -m pip install --upgrade pip
@@ -27,21 +31,26 @@ jobs:
         pip install PyQt5-sip
         python -m pip install nuitka
 
-    - name: 编译EXE文件
-      run: |
-        # 设置QT_QPA_PLATFORM_PLUGIN_PATH环境变量（如果需要）
-        # $env:QT_QPA_PLATFORM_PLUGIN_PATH = "$env:VIRTUAL_ENV/Lib/site-packages/PyQt5/Qt/plugins/platforms"
-
-        nuitka --standalone --onefile --enable-plugin=tk-inter --windows-console-mode=disable AVJPWConverterPyQt5.py --output-dir=./dist
-
     - name: 下载并解压Dependency Walker
       run: |
         curl -L -o depends.zip http://www.dependencywalker.com/depends22_x64.zip
         Expand-Archive -Path depends.zip -DestinationPath ./depends
 
-    - name: 运行Dependency Walker
+    - name: 检查Dependency Walker是否存在
+      shell: pwsh
+      run: Get-ChildItem -Path ./depends
+
+    - name: 编译EXE文件
       run: |
-        ./depends/depends.exe /c /f:1 /ot:dependencies.txt ./dist/AVJPWConverterPyQt5.exe
+        nuitka --standalone --onefile --enable-plugin=tk-inter --windows-console-mode=disable AVJPWConverterPyQt5.py --output-dir=./dist
+
+    - name: 列出dist目录的文件
+      shell: pwsh
+      run: Get-ChildItem -Path ./dist
+
+    - name: 运行Dependency Walker检查根目录下的EXE文件
+      run: |
+        ./depends/depends.exe /c /f:1 /ot:dependencies.txt ./AVJPWConverterPyQt5.exe
 
     - name: 列出当前目录的文件列表
       shell: pwsh

@@ -32,6 +32,14 @@ jobs:
         curl -L -o depends.zip http://dependencywalker.com/depends22_x64.zip
         Expand-Archive -Path depends.zip -DestinationPath ./depends
 
+    - name: 安装 MinGW64
+      run: |
+        choco install mingw
+
+    - name: 设置 MinGW64 编译器路径
+      run: |
+        $env:Path += ";C:\Program Files\mingw-w64\x86_64-8.1.0-posix-seh-rt_v6-rev0\mingw64\bin"
+
     - name: 编译EXE文件
       run: |
         echo "Y" | nuitka --standalone --onefile --enable-plugin=pyqt5 --windows-console-mode=disable AVJPWConverterPyQt5.py --output-dir=./dist

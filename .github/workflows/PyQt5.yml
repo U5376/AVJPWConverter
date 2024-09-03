@@ -24,6 +24,7 @@ jobs:
         pip install pillow
         pip install pillow-avif-plugin
         pip install PyQt5
+        pip install send2trash
         python -m pip install nuitka
 
     - name: 编译EXE文件

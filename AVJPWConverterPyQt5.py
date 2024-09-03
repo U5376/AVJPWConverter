@@ -2,16 +2,17 @@ import os
 import threading
 import logging
 import time
+import pillow_avif
 import warnings
 from PIL import Image
-import pillow_avif
+from send2trash import send2trash
 from PyQt5.QtCore import Qt, pyqtSignal, QUrl, QObject
 from PyQt5.QtGui import QDragEnterEvent, QDropEvent, QDesktopServices
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QLineEdit, QTextEdit,
     QFileDialog, QVBoxLayout, QWidget, QLabel, QComboBox, QSpinBox,
     QHBoxLayout, QFormLayout, QGroupBox, QTableWidget, QTableWidgetItem,
-    QDialog, QHeaderView)
+    QDialog, QHeaderView, QCheckBox, QGridLayout)
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -49,17 +50,34 @@ class DraggableLineEdit(QLineEdit):
 # 全局变量用来控制转换过程
 conversion_paused = threading.Event()
 
-def run_conversion(input_files, output_dir, img_format, quality, compress, pause_event, log, progress_label):
+def run_conversion(input_files, output_dir, img_format, quality, compress, height, width, delete_original, adjust_height, adjust_width, pause_event, log, progress_label):
     log.info("开始转换过程：")
     files = []
 
-    if len(input_files) == 1 and os.path.isdir(input_files[0]):  # 输入是目录
-        for filename in os.listdir(input_files[0]):
-            if filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".avif")):
-                files.append(os.path.join(input_files[0], filename))
-    else:  # 输入是单个文件或多个文件
-        files = input_files
+    # 统一处理输入文件和目录，将所有要处理的图像文件加入files列表
+    for input_path in input_files:
+        if os.path.isdir(input_path):
+            for root, _, filenames in os.walk(input_path):
+                for filename in filenames:
+                    if filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".avif")):
+                        files.append(os.path.join(root, filename))
+        elif os.path.isfile(input_path):
+            if input_path.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".avif")):
+                files.append(input_path)
 
+    # 判断输出路径，并在此处记录日志
+    if output_dir:
+        log.info(f"输出路径指定为: {output_dir}")
+    else:
+        if len(input_files) == 1:
+            if os.path.isdir(input_files[0]):
+                log.info(f"输出路径为空，使用原文件夹路径: {input_files[0]}")
+            else:
+                log.info(f"输出路径为空，使用原文件路径: {os.path.dirname(input_files[0])}")
+        else:
+            log.info(f"输出路径为空，输出在原文件路径.公共路径: {os.path.commonpath(input_files)}")
+
+    # 之后开始文件转换循环
     total_files = len(files)
     failed_count = 0
     completed_count = 0
@@ -70,18 +88,45 @@ def run_conversion(input_files, output_dir, img_format, quality, compress, pause
         max_try = 3  # 最大重试次数
         try_count = 0  # 重试计数器
 
+        file_name = os.path.basename(file)  # 保存文件名
+
         while try_count < max_try:
             try:
-                log.info(f"{os.path.basename(file)} 正在转换...")
-
                 image = Image.open(file)
 
-                # 生成新的文件名，其扩展名改为所需格式
-                new_file_name = os.path.splitext(os.path.basename(file))[0] + '.' + img_format
-                new_file_path = os.path.join(output_dir, new_file_name)
-                
+                # 如果需要调整高度或宽度，则调整图像大小，保持纵横比，不放大较小的图片
+                if (adjust_height and image.height > height) or (adjust_width and image.width > width):
+                    aspect_ratio = image.width / image.height
+
+                    if adjust_height and adjust_width:
+                        # 取高宽最低的那个数值为主
+                        if height < width / aspect_ratio:
+                            new_height = height
+                            new_width = int(height * aspect_ratio)
+                        else:
+                            new_width = width
+                            new_height = int(width / aspect_ratio)
+                    elif adjust_height:
+                        new_height = height
+                        new_width = int(height * aspect_ratio)
+                    elif adjust_width:
+                        new_width = width
+                        new_height = int(width / aspect_ratio)
+
+                    image = image.resize((new_width, new_height), Image.LANCZOS)
+
+                # 根据是否指定了输出目录，决定文件的输出路径
+                if output_dir:  # 如果指定了输出路径
+                    new_file_path = os.path.join(output_dir, file_name)
+                    new_file_name = os.path.splitext(new_file_path)[0] + '.' + img_format
+                    new_file_path = os.path.join(output_dir, new_file_name)
+                else:  # 如果未指定输出路径，使用文件的原目录
+                    new_file_name = os.path.splitext(file_name)[0] + '.' + img_format
+                    file_output_dir = os.path.dirname(file)  # 使用文件的原目录作为输出目录
+                    new_file_path = os.path.join(file_output_dir, new_file_name)
+
                 # 检查输出路径是否存在，不存在则创建
-                os.makedirs(output_dir, exist_ok=True)                
+                os.makedirs(os.path.dirname(new_file_path), exist_ok=True)
 
                 # 变换图像并保存
                 if img_format in ["jpg", "jpeg", "webp", "avif"]:
@@ -89,8 +134,14 @@ def run_conversion(input_files, output_dir, img_format, quality, compress, pause
                 elif img_format == "png":
                     image.save(new_file_path, compress_level=compress)
 
-                log.info(f"{os.path.basename(file)} 成功转换为 {img_format} 格式！")
+                log.info(f"{os.path.basename(file):<50} 成功转换为 {img_format} 格式！")
                 completed_count += 1
+
+                # 如果选择了删除原文件，则删除
+                if delete_original:
+                    absolute_path = os.path.abspath(file)  # 获取绝对路径来删除，避免报错
+                    send2trash(absolute_path)  # 将文件放入回收站
+
                 break  # 转换成功，跳出循环
             except Exception as e:
                 log.error(f"转换 {file} 失败。错误原因: {e}")
@@ -102,7 +153,6 @@ def run_conversion(input_files, output_dir, img_format, quality, compress, pause
             log.error(f"转换 {file} 失败次数超过最大重试次数，跳过转换")
             failed_count += 1
 
-        # 更新进度信息标签
         progress_label.setText(f"转换失败: {failed_count} 已完成/总数: {completed_count}/{total_files}")
 
     log.info("所有图像转换已完成！")
@@ -112,7 +162,7 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("AVJPWConverter PyQt5")
-        self.setGeometry(100, 100, 600, 620)
+        self.setGeometry(100, 100, 580, 620)
 
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
@@ -165,20 +215,67 @@ class MainWindow(QMainWindow):
         output_group.setLayout(output_layout)
 
         format_group = QGroupBox("格式选项")
-        format_layout = QFormLayout()
+        format_layout = QGridLayout()
+
         self.format_combo = QComboBox()
         self.format_combo.addItems(['jpg', 'png', 'webp', 'avif'])
         self.format_combo.setCurrentText('avif')  # 设置默认格式为AVIF
         self.format_combo.currentTextChanged.connect(self.update_quality_label)
+
         self.quality_label = QLabel("AVIF 质量 (1-63，默认值为 63):")
         self.quality_spin = QSpinBox()
         self.quality_spin.setRange(1, 63)
         self.quality_spin.setValue(63)  # 设置默认质量为63
-        format_layout.addRow(QLabel("图片格式:"), self.format_combo)
-        format_layout.addRow(self.quality_label, self.quality_spin)
-        format_group.setLayout(format_layout)
+
+        # 创建一个 QHBoxLayout 用于高度和宽度复选框和数值框
+        dimension_layout = QHBoxLayout()
+
+        self.height_checkbox = QCheckBox("图片高度")
+        self.height_checkbox.setChecked(False)  # 默认勾选状态
+        self.height_checkbox.stateChanged.connect(self.toggle_height_spin)
+
+        self.height_spin = QSpinBox()
+        self.height_spin.setRange(1, 10000)  # 设置高度范围
+        self.height_spin.setValue(1500)  # 默认值为768
+
+        self.width_checkbox = QCheckBox("图片宽度")
+        self.width_checkbox.setChecked(False)  # 默认不选中
+        self.width_checkbox.stateChanged.connect(self.toggle_width_spin)
+
+        self.width_spin = QSpinBox()
+        self.width_spin.setRange(1, 10000)  # 设置宽度范围
+        self.width_spin.setValue(1500)  # 默认值为1500
+        self.width_spin.setEnabled(False)  # 默认禁用
+
+        # 将复选框和数值框添加到布局中
+        dimension_layout.addWidget(self.height_checkbox)
+        dimension_layout.addWidget(self.height_spin)
+        dimension_layout.addWidget(self.width_checkbox)
+        dimension_layout.addWidget(self.width_spin)
+
+        # 使用 QHBoxLayout 来排列 QLabel 和 QComboBox
+        format_combo_layout = QHBoxLayout()
+        format_combo_layout.addWidget(QLabel("图片格式:"))
+        format_combo_layout.addWidget(self.format_combo)
+
+        # 添加到格式布局中
+        format_layout.addLayout(format_combo_layout, 0, 0, 1, 2, Qt.AlignLeft)
+        format_layout.addWidget(self.quality_label, 1, 0, Qt.AlignLeft)
+        format_layout.addWidget(self.quality_spin, 1, 1, Qt.AlignLeft)
+        format_layout.addLayout(dimension_layout, 1, 2, 1, 2, Qt.AlignLeft)  # 添加高度布局
+
         self.format_combo.setFixedWidth(50)  # 设置下拉框的固定宽度
         self.quality_spin.setFixedWidth(50)   # 设置数值调节框的固定宽度
+        self.height_spin.setFixedWidth(50)    # 设置高度调节框的固定宽度
+
+        # 添加复选框
+        self.delete_original_checkbox = QCheckBox("转换后删除原文件")
+        self.delete_original_checkbox.setChecked(False)  # 默认选中
+
+        format_layout.addWidget(self.delete_original_checkbox, 0, 2, 1, 5, Qt.AlignLeft)
+
+        format_group.setLayout(format_layout)
+
 
         control_group = QGroupBox("控制选项")
         control_layout = QHBoxLayout()
@@ -237,6 +334,20 @@ class MainWindow(QMainWindow):
         handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s', datefmt='%H:%M:%S'))
         self.log.handlers = [handler]
 
+    def toggle_height_spin(self, state):
+        if state == Qt.Checked:
+            self.height_spin.setEnabled(True)  # 启用高度调整
+        else:
+            self.height_spin.setEnabled(False)  # 禁用高度调整
+            self.height_spin.setValue(768)  # 选择默认高度
+
+    def toggle_width_spin(self, state):
+        if state == Qt.Checked:
+            self.width_spin.setEnabled(True)  # 启用宽度调整
+        else:
+            self.width_spin.setEnabled(False)  # 禁用宽度调整
+            self.width_spin.setValue(1500)  # 选择默认宽度
+
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
@@ -274,10 +385,21 @@ class MainWindow(QMainWindow):
 
     def open_output_folder(self):
         output_dir = self.output_line.text()
-        if output_dir:
+        input_files = self.input_line.text().split(";")  # 获取输入文件路径列表
+
+        if not output_dir:
+            if len(input_files) > 1:
+                output_dir = os.path.commonpath(input_files)  # 使用多个输入文件/文件夹的公共路径
+            elif len(input_files) == 1:
+                if os.path.isdir(input_files[0]):
+                    output_dir = input_files[0]  # 使用拖放的文件夹路径
+                else:
+                    output_dir = os.path.dirname(input_files[0])  # 获取第一个输入文件的目录
+        
+        if output_dir and os.path.isdir(output_dir):
             QDesktopServices.openUrl(QUrl.fromLocalFile(output_dir))
         else:
-            self.log.info("未选择输出路径")
+            print("未选择有效的输出路径或路径不存在")
 
     def update_quality_label(self, text):
         if (text == 'jpg'):
@@ -298,27 +420,32 @@ class MainWindow(QMainWindow):
             self.quality_spin.setValue(63)
 
     def convert_images(self):
-        if (self.input_line.text() == ''):
-            self.log_output.append('请选择输入的文件夹')
+        if self.input_line.text() == '':
+            self.log_output.append('请选择输入文件')
         else:
             input_files = self.input_line.text().split(";")
             output_dir = self.output_line.text()
-            if output_dir == '':
-                if input_files and os.path.isdir(input_files[0]):
-                    output_dir = os.path.join(input_files[0], 'processed')
-                    os.makedirs(output_dir, exist_ok=True)
-                    self.log.info(f"输出路径为空，将在输入路径下创建文件夹processed")
+
+            # 如果没有指定输出路径，output_dir 将为空字符串
+            if not output_dir:
+                output_dir = None  # 将输出路径设为 None，让 run_conversion 使用默认路径
 
             img_format = self.format_combo.currentText()
             quality = self.quality_spin.value()
             compress = self.quality_spin.value()
+            height = self.height_spin.value()  # 获取目标高度
+            width = self.width_spin.value()
+            delete_original = self.delete_original_checkbox.isChecked()
+            adjust_height = self.height_checkbox.isChecked()  # 检查复选框状态
+            adjust_width = self.width_checkbox.isChecked()
+
             if (img_format == 'png'):
                 compress = min(compress, 9)  # 限制压缩级别最大为9
             elif (img_format == 'avif'):
                 compress = min(compress, 63)  # 限制压缩级别最大为63
 
             conversion_paused.set()
-            convert_thread = threading.Thread(target=run_conversion, args=(input_files, output_dir, img_format, quality, compress, conversion_paused, self.log, self.progress_label))
+            convert_thread = threading.Thread(target=run_conversion, args=(input_files, output_dir, img_format, quality, compress, height, width, delete_original, adjust_height, adjust_width, conversion_paused, self.log, self.progress_label))
             convert_thread.start()
             self.pause_button.setText('暂停')  # 更新按钮文本
 

@@ -4,7 +4,7 @@ import logging
 import time
 import pillow_avif
 import warnings
-from PIL import Image
+from PIL import Image, ImageEnhance
 from send2trash import send2trash
 from PyQt5.QtCore import Qt, pyqtSignal, QUrl, QObject
 from PyQt5.QtGui import QDragEnterEvent, QDropEvent, QDesktopServices
@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QLineEdit, QTextEdit,
     QFileDialog, QVBoxLayout, QWidget, QLabel, QComboBox, QSpinBox,
     QHBoxLayout, QFormLayout, QGroupBox, QTableWidget, QTableWidgetItem,
-    QDialog, QHeaderView, QCheckBox, QGridLayout)
+    QDialog, QHeaderView, QCheckBox, QGridLayout, QDoubleSpinBox)
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -50,8 +50,12 @@ class DraggableLineEdit(QLineEdit):
 # 全局变量用来控制转换过程
 conversion_paused = threading.Event()
 
-def run_conversion(input_files, output_dir, img_format, quality, compress, height, width, delete_original, adjust_height, adjust_width, pause_event, log, progress_label):
+def run_conversion(input_files, output_dir, img_format, quality, compress, height, width,
+                   delete_original, adjust_height, adjust_width, sharpness, pause_event, log, progress_label):
     log.info("开始转换过程：")
+    if sharpness != 1.0:
+         log.info(f"锐化因子：{sharpness}")
+
     files = []
 
     # 统一处理输入文件和目录，将所有要处理的图像文件加入files列表
@@ -94,6 +98,11 @@ def run_conversion(input_files, output_dir, img_format, quality, compress, heigh
             try:
                 image = Image.open(file)
 
+                # 如果图像是 RGBA 模式，并且目标格式是 jpg/jpeg，则转换为 RGB 模式
+                if img_format in ["jpg", "jpeg"] and image.mode == 'RGBA':
+                    image = image.convert('RGB')
+                    log.info(f"图像 {file_name} 的 Alpha 通道已被移除，转换为 RGB 模式")
+
                 # 如果需要调整高度或宽度，则调整图像大小，保持纵横比，不放大较小的图片
                 if (adjust_height and image.height > height) or (adjust_width and image.width > width):
                     aspect_ratio = image.width / image.height
@@ -114,6 +123,11 @@ def run_conversion(input_files, output_dir, img_format, quality, compress, heigh
                         new_height = int(width / aspect_ratio)
 
                     image = image.resize((new_width, new_height), Image.LANCZOS)
+
+                # 添加锐化处理：当锐化因子不为默认值 1.0 时，进行图像锐化
+                if sharpness != 1.0:
+                    enhancer = ImageEnhance.Sharpness(image)
+                    image = enhancer.enhance(sharpness)
 
                 # 根据是否指定了输出目录，决定文件的输出路径
                 if output_dir:  # 如果指定了输出路径
@@ -222,21 +236,27 @@ class MainWindow(QMainWindow):
         self.format_combo.setCurrentText('avif')  # 设置默认格式为AVIF
         self.format_combo.currentTextChanged.connect(self.update_quality_label)
 
-        self.quality_label = QLabel("AVIF 质量 (1-63，默认值为 63):")
+        self.quality_label = QLabel("AVIF质量:")
         self.quality_spin = QSpinBox()
         self.quality_spin.setRange(1, 63)
-        self.quality_spin.setValue(63)  # 设置默认质量为63
+        self.quality_spin.setValue(63)
+        self.quality_spin.setToolTip("AVIF 质量 (1-63，默认值为 63)")
+        # 创建水平布局容器QHBoxLayout
+        quality_layout = QHBoxLayout()
+        quality_layout.addWidget(self.quality_label)
+        quality_layout.addWidget(self.quality_spin)
 
         # 创建一个 QHBoxLayout 用于高度和宽度复选框和数值框
         dimension_layout = QHBoxLayout()
 
         self.height_checkbox = QCheckBox("图片高度")
-        self.height_checkbox.setChecked(False)  # 默认勾选状态
+        self.height_checkbox.setChecked(True)  # 默认勾选状态
         self.height_checkbox.stateChanged.connect(self.toggle_height_spin)
 
         self.height_spin = QSpinBox()
         self.height_spin.setRange(1, 10000)  # 设置高度范围
-        self.height_spin.setValue(1500)  # 默认值为768
+        self.height_spin.setValue(768)  # 默认值为768
+        self.height_spin.setToolTip("按高宽最低值保持纵横比缩放")
 
         self.width_checkbox = QCheckBox("图片宽度")
         self.width_checkbox.setChecked(False)  # 默认不选中
@@ -259,23 +279,37 @@ class MainWindow(QMainWindow):
         format_combo_layout.addWidget(self.format_combo)
 
         # 添加到格式布局中
-        format_layout.addLayout(format_combo_layout, 0, 0, 1, 2, Qt.AlignLeft)
-        format_layout.addWidget(self.quality_label, 1, 0, Qt.AlignLeft)
-        format_layout.addWidget(self.quality_spin, 1, 1, Qt.AlignLeft)
-        format_layout.addLayout(dimension_layout, 1, 2, 1, 2, Qt.AlignLeft)  # 添加高度布局
+        format_layout.addLayout(format_combo_layout, 0, 0, 1, 1, Qt.AlignLeft)
+        format_layout.addLayout(quality_layout, 1, 0, 1, 1, Qt.AlignLeft)
+        format_layout.addLayout(dimension_layout, 1, 1, 1, 1, Qt.AlignLeft)  # 添加高度布局
 
         self.format_combo.setFixedWidth(50)  # 设置下拉框的固定宽度
         self.quality_spin.setFixedWidth(50)   # 设置数值调节框的固定宽度
         self.height_spin.setFixedWidth(50)    # 设置高度调节框的固定宽度
 
-        # 添加复选框
-        self.delete_original_checkbox = QCheckBox("转换后删除原文件")
-        self.delete_original_checkbox.setChecked(False)  # 默认选中
+        #锐化选项
+        sharpness_layout = QHBoxLayout()
+        sharpness_label = QLabel("锐化:")
+        self.sharpness_spin = QDoubleSpinBox()
+        self.sharpness_spin.setRange(-2.0, 3.0)
+        self.sharpness_spin.setSingleStep(0.1)
+        self.sharpness_spin.setValue(1.0)  # 默认值1.0表示不改变原图
+        self.sharpness_spin.setToolTip("1.0不处理,范围:负2-3(1.7-8有效减轻avif格式彩色CG眼睛线条糊化)")  # 鼠标悬停显示提示
+        sharpness_layout.addWidget(sharpness_label)
+        sharpness_layout.addWidget(self.sharpness_spin)
 
-        format_layout.addWidget(self.delete_original_checkbox, 0, 2, 1, 5, Qt.AlignLeft)
+        # 删除原文件选项
+        self.delete_original_checkbox = QCheckBox("转换后删除原文件")
+        self.delete_original_checkbox.setChecked(False)  # 默认不选中
+
+        # 创建一个新的 QHBoxLayout 来包含锐化选项和删除原文件选项
+        combined_layout = QHBoxLayout()
+        combined_layout.addWidget(self.delete_original_checkbox)  # 添加删除原文件复选框
+        combined_layout.addLayout(sharpness_layout)  # 添加锐化控件布局
+
+        format_layout.addLayout(combined_layout, 0, 1, 1, 3, Qt.AlignLeft)
 
         format_group.setLayout(format_layout)
-
 
         control_group = QGroupBox("控制选项")
         control_layout = QHBoxLayout()
@@ -291,7 +325,6 @@ class MainWindow(QMainWindow):
         self.show_list_button = QPushButton("显示文件列表")
         self.show_list_button.clicked.connect(self.show_file_list)
         self.show_list_button.setFixedWidth(100)  # 固定宽度
-        # 创建打开输出文件夹按钮
         self.open_output_button = QPushButton("打开输出文件夹")
         self.open_output_button.clicked.connect(self.open_output_folder)
         self.open_output_button.setFixedWidth(120)  # 固定宽度        
@@ -402,22 +435,29 @@ class MainWindow(QMainWindow):
             print("未选择有效的输出路径或路径不存在")
 
     def update_quality_label(self, text):
-        if (text == 'jpg'):
-            self.quality_label.setText('JPEG 质量 (1-100，默认值为 90):')
+        if text == 'jpg':
+            self.quality_label.setText('JPEG质量:')
             self.quality_spin.setRange(1, 100)
             self.quality_spin.setValue(90)
-        elif (text == 'png'):
-            self.quality_label.setText('PNG 压缩级别 (0-9，默认值为 6):')
+            self.quality_spin.setToolTip("JPEG 质量范围：1-100，默认90")
+
+        elif text == 'png':
+            self.quality_label.setText('PNG压缩:')
             self.quality_spin.setRange(0, 9)
             self.quality_spin.setValue(6)
-        elif (text == 'webp'):
-            self.quality_label.setText('WebP 质量 (0-100，默认值为 80):')
+            self.quality_spin.setToolTip("PNG 压缩级别 (0-9，默认值为 6")
+
+        elif text == 'webp':
+            self.quality_label.setText('WebP质量:')
             self.quality_spin.setRange(0, 100)
             self.quality_spin.setValue(80)
-        elif (text == 'avif'):
-            self.quality_label.setText('AVIF 质量 (1-63，默认值为 63):')
+            self.quality_spin.setToolTip("WebP 质量 (0-100，默认值为 80)")
+
+        elif text == 'avif':
+            self.quality_label.setText('AVIF质量:')
             self.quality_spin.setRange(1, 63)
             self.quality_spin.setValue(63)
+            self.quality_spin.setToolTip("AVIF 质量 (1-63，默认值为 63)")
 
     def convert_images(self):
         if self.input_line.text() == '':
@@ -438,6 +478,7 @@ class MainWindow(QMainWindow):
             delete_original = self.delete_original_checkbox.isChecked()
             adjust_height = self.height_checkbox.isChecked()  # 检查复选框状态
             adjust_width = self.width_checkbox.isChecked()
+            sharpness = self.sharpness_spin.value()  # 获取锐化因子
 
             if (img_format == 'png'):
                 compress = min(compress, 9)  # 限制压缩级别最大为9
@@ -445,7 +486,9 @@ class MainWindow(QMainWindow):
                 compress = min(compress, 63)  # 限制压缩级别最大为63
 
             conversion_paused.set()
-            convert_thread = threading.Thread(target=run_conversion, args=(input_files, output_dir, img_format, quality, compress, height, width, delete_original, adjust_height, adjust_width, conversion_paused, self.log, self.progress_label))
+            convert_thread = threading.Thread(target=run_conversion, args=(
+                input_files, output_dir, img_format, quality, compress, height, width,
+                delete_original, adjust_height, adjust_width, sharpness, conversion_paused, self.log, self.progress_label))
             convert_thread.start()
             self.pause_button.setText('暂停')  # 更新按钮文本
 

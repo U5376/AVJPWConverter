@@ -43,7 +43,11 @@ class DraggableLineEdit(QLineEdit):
     def dropEvent(self, event: QDropEvent):
         urls = event.mimeData().urls()
         paths = [url.toLocalFile() for url in urls]
-        self.setText(";".join(paths))  # 使用";"分隔路径
+        current_text = self.text()
+        existing_paths = current_text.split(";") if current_text else []
+        combined_paths = existing_paths + paths
+        unique_paths = list(dict.fromkeys(combined_paths))  # 保留顺序并去重
+        self.setText(";".join(unique_paths))
         log.info(f"拖放的文件: {';'.join(paths)}")  # 记录日志
         print(f"拖放的文件: {';'.join(paths)}")  # 调试日志
 
@@ -51,7 +55,7 @@ class DraggableLineEdit(QLineEdit):
 conversion_paused = threading.Event()
 
 def run_conversion(input_files, output_dir, img_format, quality, compress, height, width,
-                   delete_original, adjust_height, adjust_width, sharpness, pause_event, log, progress_label):
+                   delete_original, adjust_height, adjust_width, sharpness, pause_event, log, progress_label, preserve_metadata):
     log.info("开始转换过程：")
     if sharpness != 1.0:
          log.info(f"锐化因子：{sharpness}")
@@ -147,6 +151,11 @@ def run_conversion(input_files, output_dir, img_format, quality, compress, heigh
                     image.save(new_file_path, quality=quality)
                 elif img_format == "png":
                     image.save(new_file_path, compress_level=compress)
+
+                # 是否保留元数据
+                if preserve_metadata:
+                    original_stat = os.stat(file)
+                    os.utime(new_file_path, (original_stat.st_atime, original_stat.st_mtime))
 
                 log.info(f"{os.path.basename(file):<50} 成功转换为 {img_format} 格式！")
                 completed_count += 1
@@ -289,7 +298,7 @@ class MainWindow(QMainWindow):
 
         #锐化选项
         sharpness_layout = QHBoxLayout()
-        sharpness_label = QLabel("锐化:")
+        sharpness_label = QLabel("锐化")
         self.sharpness_spin = QDoubleSpinBox()
         self.sharpness_spin.setRange(-2.0, 3.0)
         self.sharpness_spin.setSingleStep(0.1)
@@ -302,9 +311,15 @@ class MainWindow(QMainWindow):
         self.delete_original_checkbox = QCheckBox("转换后删除原文件")
         self.delete_original_checkbox.setChecked(False)  # 默认不选中
 
+        # 保留元数据选项
+        self.preserve_metadata_checkbox = QCheckBox("保留修改时间")
+        self.preserve_metadata_checkbox.setChecked(False)  # 默认不选中
+
         # 创建一个新的 QHBoxLayout 来包含锐化选项和删除原文件选项
         combined_layout = QHBoxLayout()
         combined_layout.addWidget(self.delete_original_checkbox)  # 添加删除原文件复选框
+        combined_layout.addSpacing(8)  # 添加9像素的间距对齐排版
+        combined_layout.addWidget(self.preserve_metadata_checkbox) # 保留元数据复选框
         combined_layout.addLayout(sharpness_layout)  # 添加锐化控件布局
 
         format_layout.addLayout(combined_layout, 0, 1, 1, 3, Qt.AlignLeft)
@@ -479,6 +494,7 @@ class MainWindow(QMainWindow):
             adjust_height = self.height_checkbox.isChecked()  # 检查复选框状态
             adjust_width = self.width_checkbox.isChecked()
             sharpness = self.sharpness_spin.value()  # 获取锐化因子
+            preserve_metadata = self.preserve_metadata_checkbox.isChecked() # 保留原数据
 
             if (img_format == 'png'):
                 compress = min(compress, 9)  # 限制压缩级别最大为9
@@ -488,7 +504,7 @@ class MainWindow(QMainWindow):
             conversion_paused.set()
             convert_thread = threading.Thread(target=run_conversion, args=(
                 input_files, output_dir, img_format, quality, compress, height, width,
-                delete_original, adjust_height, adjust_width, sharpness, conversion_paused, self.log, self.progress_label))
+                delete_original, adjust_height, adjust_width, sharpness, conversion_paused, self.log, self.progress_label, preserve_metadata))
             convert_thread.start()
             self.pause_button.setText('暂停')  # 更新按钮文本
 

@@ -6,6 +6,7 @@ import pillow_avif
 import warnings
 from PIL import Image, ImageEnhance
 from send2trash import send2trash
+from PyQt5 import QtCore
 from PyQt5.QtCore import Qt, pyqtSignal, QUrl, QObject
 from PyQt5.QtGui import QDragEnterEvent, QDropEvent, QDesktopServices
 from PyQt5.QtWidgets import (
@@ -49,140 +50,170 @@ class DraggableLineEdit(QLineEdit):
         unique_paths = list(dict.fromkeys(combined_paths))  # 保留顺序并去重
         self.setText(";".join(unique_paths))
         log.info(f"拖放的文件: {';'.join(paths)}")  # 记录日志
-        print(f"拖放的文件: {';'.join(paths)}")  # 调试日志
 
 # 全局变量用来控制转换过程
 conversion_paused = threading.Event()
+conversion_stopped = False  # 新增全局停止标志
 
 def run_conversion(input_files, output_dir, img_format, quality, compress, height, width,
-                   delete_original, adjust_height, adjust_width, sharpness, pause_event, log, progress_label, preserve_metadata):
-    log.info("开始转换过程：")
-    if sharpness != 1.0:
-         log.info(f"锐化因子：{sharpness}")
+                   delete_original, adjust_height, adjust_width, sharpness, pause_event,
+                   stop_event, log, progress_label, preserve_metadata, on_finished):
+    global conversion_stopped
+    conversion_stopped = False
+    
+    try:
+        # ========== 转换开始 ==========
+        log.info("开始转换过程：")
+        if sharpness != 1.0:
+            log.info(f"锐化因子：{sharpness}")
 
-    files = []
+        files = []
 
-    # 统一处理输入文件和目录，将所有要处理的图像文件加入files列表
-    for input_path in input_files:
-        if os.path.isdir(input_path):
-            for root, _, filenames in os.walk(input_path):
-                for filename in filenames:
-                    if filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".avif")):
-                        files.append(os.path.join(root, filename))
-        elif os.path.isfile(input_path):
-            if input_path.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".avif")):
-                files.append(input_path)
+        # 统一处理输入文件和目录，将所有要处理的图像文件加入files列表
+        for input_path in input_files:
+            if os.path.isdir(input_path):
+                for root, _, filenames in os.walk(input_path):
+                    for filename in filenames:
+                        if filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".avif")):
+                            files.append(os.path.join(root, filename))
+            elif os.path.isfile(input_path):
+                if input_path.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".avif")):
+                    files.append(input_path)
 
-    # 判断输出路径，并在此处记录日志
-    if output_dir:
-        log.info(f"输出路径指定为: {output_dir}")
-    else:
-        if len(input_files) == 1:
-            if os.path.isdir(input_files[0]):
-                log.info(f"输出路径为空，使用原文件夹路径: {input_files[0]}")
-            else:
-                log.info(f"输出路径为空，使用原文件路径: {os.path.dirname(input_files[0])}")
+        # 判断输出路径，并在此处记录日志
+        if output_dir:
+            log.info(f"输出路径指定为: {output_dir}")
         else:
-            log.info(f"输出路径为空，输出在原文件路径.公共路径: {os.path.commonpath(input_files)}")
+            if len(input_files) == 1:
+                if os.path.isdir(input_files[0]):
+                    log.info(f"输出路径为空，使用原文件夹路径: {input_files[0]}")
+                else:
+                    log.info(f"输出路径为空，使用原文件路径: {os.path.dirname(input_files[0])}")
+            else:
+                log.info(f"输出路径为空，输出在原文件路径.公共路径: {os.path.commonpath(input_files)}")
 
-    # 之后开始文件转换循环
-    total_files = len(files)
-    failed_count = 0
-    completed_count = 0
+        # 之后开始文件转换循环
+        total_files = len(files)
+        failed_count = 0
+        completed_count = 0
 
-    for file in files:
-        pause_event.wait()  # 检查是否暂停
+        for file in files:
+            # 检查停止事件
+            if stop_event.is_set():
+                log.info("转换被用户终止")
+                return
+                
+            # 处理暂停状态（简化版）
+            if not pause_event.is_set():
+                log.info("转换已暂停")
+                while not pause_event.is_set():
+                    if stop_event.is_set():
+                        log.info("转换被用户终止")
+                        return
+                    time.sleep(0.1)
+                log.info("转换已恢复")
 
-        max_try = 3  # 最大重试次数
-        try_count = 0  # 重试计数器
+            max_try = 3  # 最大重试次数
+            try_count = 0  # 重试计数器
 
-        file_name = os.path.basename(file)  # 保存文件名
+            file_name = os.path.basename(file)  # 保存文件名
 
-        while try_count < max_try:
-            try:
-                image = Image.open(file)
+            while try_count < max_try:
+                if stop_event.is_set():
+                    log.info("转换被用户终止")
+                    return
+                try:
+                    image = Image.open(file)
 
-                # 如果图像是 RGBA 模式，并且目标格式是 jpg/jpeg，则转换为 RGB 模式
-                if img_format in ["jpg", "jpeg"] and image.mode == 'RGBA':
-                    image = image.convert('RGB')
-                    log.info(f"图像 {file_name} 的 Alpha 通道已被移除，转换为 RGB 模式")
+                    # 如果图像是 RGBA 模式，并且目标格式是 jpg/jpeg，则转换为 RGB 模式
+                    if img_format in ["jpg", "jpeg"] and image.mode == 'RGBA':
+                        image = image.convert('RGB')
+                        log.info(f"图像 {file_name} 的 Alpha 通道已被移除，转换为 RGB 模式")
 
-                # 如果需要调整高度或宽度，则调整图像大小，保持纵横比，不放大较小的图片
-                if (adjust_height and image.height > height) or (adjust_width and image.width > width):
-                    aspect_ratio = image.width / image.height
+                    # 如果需要调整高度或宽度，则调整图像大小，保持纵横比，不放大较小的图片
+                    if (adjust_height and image.height > height) or (adjust_width and image.width > width):
+                        aspect_ratio = image.width / image.height
 
-                    if adjust_height and adjust_width:
-                        # 取高宽最低的那个数值为主
-                        if height < width / aspect_ratio:
+                        if adjust_height and adjust_width:
+                            # 取高宽最低的那个数值为主
+                            if height < width / aspect_ratio:
+                                new_height = height
+                                new_width = int(height * aspect_ratio)
+                            else:
+                                new_width = width
+                                new_height = int(width / aspect_ratio)
+                        elif adjust_height:
                             new_height = height
                             new_width = int(height * aspect_ratio)
-                        else:
+                        elif adjust_width:
                             new_width = width
                             new_height = int(width / aspect_ratio)
-                    elif adjust_height:
-                        new_height = height
-                        new_width = int(height * aspect_ratio)
-                    elif adjust_width:
-                        new_width = width
-                        new_height = int(width / aspect_ratio)
 
-                    image = image.resize((new_width, new_height), Image.LANCZOS)
+                        image = image.resize((new_width, new_height), Image.LANCZOS)
 
-                # 添加锐化处理：当锐化因子不为默认值 1.0 时，进行图像锐化
-                if sharpness != 1.0:
-                    enhancer = ImageEnhance.Sharpness(image)
-                    image = enhancer.enhance(sharpness)
+                    # 添加锐化处理：当锐化因子不为默认值 1.0 时，进行图像锐化
+                    if sharpness != 1.0:
+                        enhancer = ImageEnhance.Sharpness(image)
+                        image = enhancer.enhance(sharpness)
 
-                # 根据是否指定了输出目录，决定文件的输出路径
-                if output_dir:  # 如果指定了输出路径
-                    new_file_path = os.path.join(output_dir, file_name)
-                    new_file_name = os.path.splitext(new_file_path)[0] + '.' + img_format
-                    new_file_path = os.path.join(output_dir, new_file_name)
-                else:  # 如果未指定输出路径，使用文件的原目录
-                    new_file_name = os.path.splitext(file_name)[0] + '.' + img_format
-                    file_output_dir = os.path.dirname(file)  # 使用文件的原目录作为输出目录
-                    new_file_path = os.path.join(file_output_dir, new_file_name)
+                    # 根据是否指定了输出目录，决定文件的输出路径
+                    if output_dir:  # 如果指定了输出路径
+                        new_file_path = os.path.join(output_dir, file_name)
+                        new_file_name = os.path.splitext(new_file_path)[0] + '.' + img_format
+                        new_file_path = os.path.join(output_dir, new_file_name)
+                    else:  # 如果未指定输出路径，使用文件的原目录
+                        new_file_name = os.path.splitext(file_name)[0] + '.' + img_format
+                        file_output_dir = os.path.dirname(file)  # 使用文件的原目录作为输出目录
+                        new_file_path = os.path.join(file_output_dir, new_file_name)
 
-                # 检查输出路径是否存在，不存在则创建
-                os.makedirs(os.path.dirname(new_file_path), exist_ok=True)
+                    # 检查输出路径是否存在，不存在则创建
+                    os.makedirs(os.path.dirname(new_file_path), exist_ok=True)
 
-                # 变换图像并保存
-                if img_format in ["jpg", "jpeg", "webp", "avif"]:
-                    image.save(new_file_path, quality=quality)
-                elif img_format == "png":
-                    image.save(new_file_path, compress_level=compress)
+                    # 变换图像并保存
+                    if img_format in ["jpg", "jpeg", "webp", "avif"]:
+                        image.save(new_file_path, quality=quality)
+                    elif img_format == "png":
+                        image.save(new_file_path, compress_level=compress)
 
-                # 是否保留元数据
-                if preserve_metadata:
-                    original_stat = os.stat(file)
-                    os.utime(new_file_path, (original_stat.st_atime, original_stat.st_mtime))
+                    # 是否保留元数据
+                    if preserve_metadata:
+                        original_stat = os.stat(file)
+                        os.utime(new_file_path, (original_stat.st_atime, original_stat.st_mtime))
 
-                log.info(f"{os.path.basename(file):<50} 成功转换为 {img_format} 格式！")
-                completed_count += 1
+                    log.info(f"{os.path.basename(file):<50} 成功转换为 {img_format} 格式！")
+                    completed_count += 1
 
-                # 如果选择了删除原文件，则删除
-                if delete_original:
-                    absolute_path = os.path.abspath(file)  # 获取绝对路径来删除，避免报错
-                    send2trash(absolute_path)  # 将文件放入回收站
+                    # 如果选择了删除原文件，则删除
+                    if delete_original:
+                        absolute_path = os.path.abspath(file)  # 获取绝对路径来删除，避免报错
+                        send2trash(absolute_path)  # 将文件放入回收站
 
-                break  # 转换成功，跳出循环
-            except Exception as e:
-                log.error(f"转换 {file} 失败。错误原因: {e}")
-                log.info(f"正在重试转换 {os.path.basename(file)}")
-                try_count += 1
-                time.sleep(1)  # 等待一秒后重试
+                    break  # 转换成功，跳出循环
+                except Exception as e:
+                    log.error(f"转换 {file} 失败。错误原因: {e}")
+                    log.info(f"正在重试转换 {os.path.basename(file)}")
+                    try_count += 1
+                    time.sleep(1)  # 等待一秒后重试
 
-        if try_count == max_try:
-            log.error(f"转换 {file} 失败次数超过最大重试次数，跳过转换")
-            failed_count += 1
+            if try_count == max_try:
+                log.error(f"转换 {file} 失败次数超过最大重试次数，跳过转换")
+                failed_count += 1
 
-        progress_label.setText(f"转换失败: {failed_count} 已完成/总数: {completed_count}/{total_files}")
+            progress_label.setText(f"转换失败: {failed_count} 已完成/总数: {completed_count}/{total_files}")
 
-    log.info("所有图像转换已完成！")
+        log.info("所有图像转换已完成！")
+    except Exception as e:
+        log.error(f"转换过程发生错误: {str(e)}")
+    finally:
+        on_finished()  # 确保无论是否完成都执行清空操作
+        log.info("转换流程结束")
 
 class MainWindow(QMainWindow):
+    clear_input_signal = pyqtSignal()  # 新增信号
+
     def __init__(self):
         super().__init__()
+        self.convert_thread = None  # 添加线程引用
 
         self.setWindowTitle("AVJPWConverter PyQt5")
         self.setGeometry(100, 100, 580, 620)
@@ -330,21 +361,27 @@ class MainWindow(QMainWindow):
         control_layout = QHBoxLayout()
         self.convert_button = QPushButton("开始转换")
         self.convert_button.clicked.connect(self.convert_images)
-        self.convert_button.setFixedWidth(100)  # 固定宽度
+        self.convert_button.setFixedWidth(70)  # 固定宽度
         self.pause_button = QPushButton("暂停/继续")
         self.pause_button.clicked.connect(self.pause_conversion)
-        self.pause_button.setFixedWidth(100)  # 固定宽度
+        self.pause_button.setFixedWidth(70)  # 固定宽度
+        self.stop_button = QPushButton("停止")
+        self.stop_button.clicked.connect(self.stop_conversion)
+        self.stop_button.setFixedWidth(70)  # 固定宽度
+        self.stop_event = threading.Event()
+        self.clear_input_signal.connect(self.clear_input_line)  # 连接信号与槽
         self.clear_log_button = QPushButton("清空日志")
         self.clear_log_button.clicked.connect(self.clear_log)
-        self.clear_log_button.setFixedWidth(100)  # 固定宽度
+        self.clear_log_button.setFixedWidth(70)  # 固定宽度
         self.show_list_button = QPushButton("显示文件列表")
         self.show_list_button.clicked.connect(self.show_file_list)
         self.show_list_button.setFixedWidth(100)  # 固定宽度
         self.open_output_button = QPushButton("打开输出文件夹")
         self.open_output_button.clicked.connect(self.open_output_folder)
-        self.open_output_button.setFixedWidth(120)  # 固定宽度        
+        self.open_output_button.setFixedWidth(120)  # 固定宽度
         control_layout.addWidget(self.convert_button)
         control_layout.addWidget(self.pause_button)
+        control_layout.addWidget(self.stop_button)
         control_layout.addWidget(self.show_list_button)
         control_layout.addWidget(self.open_output_button)
         control_layout.addWidget(self.clear_log_button)
@@ -406,16 +443,13 @@ class MainWindow(QMainWindow):
         drop_pos = event.pos()
         if self.input_line.geometry().contains(drop_pos):
             self.input_line.setText(";".join(paths))
-            print(f"输入路径设置为: {paths}")  # 调试日志
         elif self.output_line.geometry().contains(drop_pos):
             self.output_line.setText(paths[0])
-            print(f"输出路径设置为: {paths[0]}")  # 调试日志
 
     def select_input_files(self):
         input_files, _ = QFileDialog.getOpenFileNames(self, "选择输入文件")
         self.input_line.setText(";".join(input_files))
         self.log.info(f"选择的输入文件是: {input_files}")
-        print(f"选择的输入文件是: {input_files}")  # 调试日志
 
     def select_input_dir(self):
         input_dir = QFileDialog.getExistingDirectory(self, "选择输入文件夹")
@@ -423,13 +457,11 @@ class MainWindow(QMainWindow):
             input_dir += os.path.sep
         self.input_line.setText(input_dir)
         self.log.info(f"选择的输入文件夹是: {input_dir}")
-        print(f"选择的输入文件夹是: {input_dir}")  # 调试日志
 
     def select_output_dir(self):
         output_dir = QFileDialog.getExistingDirectory(self, "选择输出路径")
         self.output_line.setText(output_dir)
         self.log.info(f"选择的输出目录是: {output_dir}")
-        print(f"选择的输出目录是: {output_dir}")  # 调试日志
 
     def open_output_folder(self):
         output_dir = self.output_line.text()
@@ -502,24 +534,80 @@ class MainWindow(QMainWindow):
                 compress = min(compress, 63)  # 限制压缩级别最大为63
 
             conversion_paused.set()
-            convert_thread = threading.Thread(target=run_conversion, args=(
-                input_files, output_dir, img_format, quality, compress, height, width,
-                delete_original, adjust_height, adjust_width, sharpness, conversion_paused, self.log, self.progress_label, preserve_metadata))
-            convert_thread.start()
-            self.pause_button.setText('暂停')  # 更新按钮文本
+            # 清理之前的线程
+            if hasattr(self, 'convert_thread'):
+                try:
+                    if self.convert_thread.is_alive():
+                        self.stop_event.set()
+                        self.convert_thread.join(timeout=0.5)
+                except:
+                    pass
+
+            # 创建并启动新线程
+            self.convert_thread = threading.Thread(
+                target=run_conversion,
+                args=(input_files, output_dir, img_format, quality, compress,
+                      height, width, delete_original, adjust_height, adjust_width,
+                      sharpness, conversion_paused, self.stop_event, self.log,
+                      self.progress_label, preserve_metadata,
+                      lambda: [
+                          self.clear_input_signal.emit(),
+                          delattr(self, 'convert_thread')  # 转换完成后清理线程引用
+                      ])
+            )
+            self.convert_thread.start()
+            self.pause_button.setText('暂停')
+            self.stop_button.setText('停止')
+            self.log.info("转换已开始(点击暂停按钮可中断)")
 
     def clear_log(self):
         self.log_output.clear()
 
     def pause_conversion(self):
-        if conversion_paused.is_set():
-            conversion_paused.clear()
-            self.pause_button.setText('继续')
-            self.log.info('转换已暂停')
-        else:
-            conversion_paused.set()
-            self.pause_button.setText('暂停')
-            self.log.info('转换已继续')
+        """线程安全的暂停/继续控制"""
+        try:
+            if not hasattr(self, 'convert_thread') or not self.convert_thread.is_alive():
+                return
+                
+            # 使用信号安全更新UI
+            if conversion_paused.is_set():
+                conversion_paused.clear()
+                self.pause_button.setText('暂停')
+                self.log_emitter.log_message.emit("转换已恢复")
+            else:
+                conversion_paused.set()
+                self.pause_button.setText('继续')
+                self.log_emitter.log_message.emit("转换已暂停(点击继续按钮恢复)")
+                
+            QApplication.processEvents()
+        except Exception as e:
+            self.log.error(f"暂停操作出错: {str(e)}")
+
+    def clear_input_line(self):
+        """清空输入路径的槽函数"""
+        self.input_line.clear()
+        self.log.info("输入路径已重置")
+
+    def stop_conversion(self):
+        """安全停止转换(保留输出路径)"""
+        try:
+            global conversion_stopped
+            conversion_stopped = True
+            self.stop_event.set()
+            conversion_paused.set()  # 确保线程能检测停止
+            
+            # 仅清空输入路径
+            self.clear_input_signal.emit()
+            self.progress_label.setText("转换已停止")
+            self.log.info("转换已停止(输出路径保留)")
+            
+            # 重置停止状态
+            time.sleep(0.1)  # 确保线程响应
+            self.stop_event.clear()
+            conversion_stopped = False
+            
+        except Exception as e:
+            self.log.error(f"停止出错: {str(e)}")
 
     def show_file_list(self):
         input_files = self.input_line.text().split(";")

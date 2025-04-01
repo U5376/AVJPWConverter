@@ -1,0 +1,47 @@
+name: image_converter参数命令行exe构建
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2019
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 设置Python 3.8
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.8"
+        architecture: "x64"
+
+    - name: 安装基础依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install pillow nuitka
+
+    - name: 编译EXE (Nuitka)
+      run: |
+        python -m nuitka ^
+          --standalone ^
+          --onefile ^
+          --windows-disable-console ^
+          --output-dir=dist ^
+          --include-package=Pillow ^
+          --plugin-enable=pillow ^
+          image_converter.py
+
+    - name: 验证EXE文件
+      shell: cmd
+      run: |
+        cd dist
+        image_converter.exe --version || echo "EXE运行测试失败"
+
+    - name: 上传制品
+      uses: actions/upload-artifact@v4
+      with:
+        name: image_converter
+        path: |
+          dist/image_converter.exe

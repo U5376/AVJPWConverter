@@ -299,13 +299,13 @@ class MainWindow(QMainWindow):
         self.height_spin.setToolTip("按高宽最低值保持纵横比缩放")
 
         self.width_checkbox = QCheckBox("图片宽度")
-        self.width_checkbox.setChecked(False)  # 默认不选中
+        self.width_checkbox.setChecked(False)
         self.width_checkbox.stateChanged.connect(self.toggle_width_spin)
 
         self.width_spin = QSpinBox()
         self.width_spin.setRange(1, 10000)  # 设置宽度范围
         self.width_spin.setValue(1500)  # 默认值为1500
-        self.width_spin.setEnabled(False)  # 默认禁用
+        self.width_spin.setEnabled(False)
 
         # 将复选框和数值框添加到布局中
         dimension_layout.addWidget(self.height_checkbox)
@@ -340,11 +340,11 @@ class MainWindow(QMainWindow):
 
         # 删除原文件选项
         self.delete_original_checkbox = QCheckBox("转换后删除原文件")
-        self.delete_original_checkbox.setChecked(False)  # 默认不选中
+        self.delete_original_checkbox.setChecked(False)
 
         # 保留元数据选项
         self.preserve_metadata_checkbox = QCheckBox("保留修改时间")
-        self.preserve_metadata_checkbox.setChecked(False)  # 默认不选中
+        self.preserve_metadata_checkbox.setChecked(True)
 
         # 创建一个新的 QHBoxLayout 来包含锐化、删除原文件、保留元数据选项
         combined_layout = QHBoxLayout()

@@ -21,7 +21,7 @@ def convert_image(
             if not width: width = orig_width
             if not height: height = orig_height
             ratio = min(width/orig_width, height/orig_height)
-            new_size = (int(orig_width * ratio), int(orig_height * ratio)
+            new_size = (int(orig_width * ratio), int(orig_height * ratio))
             img = img.resize(new_size, Image.LANCZOS)
         
         # 锐化处理

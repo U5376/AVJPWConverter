@@ -23,14 +23,15 @@ jobs:
         pip install pillow nuitka
 
     - name: 编译EXE (Nuitka)
+      shell: pwsh  # 明确指定使用PowerShell
       run: |
-        python -m nuitka ^
-          --standalone ^
-          --onefile ^
-          --windows-disable-console ^
-          --output-dir=dist ^
-          --include-package=Pillow ^
-          --plugin-enable=pillow ^
+        python -m nuitka `
+          --standalone `
+          --onefile `
+          --windows-disable-console `
+          --output-dir=dist `
+          --include-package=Pillow `
+          --plugin-enable=pillow `
           image_converter.py
 
     - name: 验证EXE文件

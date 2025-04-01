@@ -1,0 +1,37 @@
+name: image_converter参数命令行exe构建
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2019
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 设置 Python 3.8
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.8"
+        architecture: "x64"
+
+    - name: 安装依赖
+      run: |
+        pip install nuitka
+        pip install pillow
+
+    - name: 编译EXE文件
+      run: |
+        echo Yes | nuitka --standalone --onefile image_converter.py
+
+    - name: 列出当前目录的文件列表
+      shell: pwsh
+      run: Get-ChildItem -Force
+
+    - name: 上传EXE文件
+      uses: actions/upload-artifact@v4
+      with:
+        name: image_converter.exe
+        path: ./image_converter.exe

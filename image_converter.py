@@ -30,7 +30,6 @@ def convert_image(
         
         # 处理图像模式转换
         if img.mode == 'RGBA' and img_format.lower() in ['jpg', 'jpeg']:
-            print(f"RGBA图像转换为RGB模式(JPEG格式需要)")
             img = img.convert('RGB')
         elif img.mode == 'P':
             print(f"保持调色板图像原模式")
@@ -126,19 +125,31 @@ if __name__ == "__main__":
     success_count = 0
     for i, input_file in enumerate(inputs, 1):
         try:
-            # 构建输出路径
+            # 将输入文件转为绝对路径
+            input_path = os.path.abspath(input_file)
+            if not os.path.exists(input_path):
+                raise FileNotFoundError(f"输入文件 {input_path} 不存在")
+
+            # 生成输出路径
             if args.output:
-                os.makedirs(args.output, exist_ok=True)  # 确保输出目录存在
+                # 用户指定了输出目录
+                output_dir = os.path.abspath(args.output)
                 filename = f"{os.path.splitext(os.path.basename(input_file))[0]}.{args.format}"
-                output_file = os.path.join(args.output, filename)
+                output_file = os.path.join(output_dir, filename)
             else:
-                output_file = None  # 由 convert_image 自动生成路径
+                # 使用输入文件所在目录
+                output_dir = os.path.dirname(input_path) or os.getcwd()
+                filename = f"{os.path.splitext(os.path.basename(input_file))[0]}.{args.format}"
+                output_file = os.path.join(output_dir, filename)
 
-            # 简化的日志输出
-            print(f"[{i}/{len(inputs)}] 转换中: {os.path.basename(input_file)}")
+            # 确保输出目录存在
+            os.makedirs(os.path.dirname(output_file), exist_ok=True)
+            # 显示转换进度
+            print(f"[{i}/{len(inputs)}] {os.path.basename(input_file)} → {os.path.basename(output_file)}")
 
+            # 执行转换
             result = convert_image(
-                input_file,
+                input_path,  # 使用绝对路径 input_path
                 output_file,
                 args.format,
                 args.quality,
@@ -148,11 +159,10 @@ if __name__ == "__main__":
             )
             if result.get('success'):
                 success_count += 1
-                print(f"状态: 成功 (模式: {result['mode']})")
             else:
-                print("状态: 失败")
+                print(f"失败：{result.get('error', '未知错误')}")
         except Exception as e:
-            print(f"处理异常: {str(e)}")
+            print(f"严重异常：{str(e)}")
 
     print(f"\n转换完成: 成功 {success_count}/{len(inputs)}")
     print(f"失败数量: {len(inputs) - success_count}")

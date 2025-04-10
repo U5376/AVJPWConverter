@@ -65,56 +65,59 @@ def convert_image(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="CLI Image Converter (支持多文件/目录)")
     parser.add_argument("-i", "--input", nargs='+', required=True,
-                       help="输入文件或目录（支持多个路径）")
+                    help="输入文件、目录或文件列表（支持 @list.txt 格式）")
     parser.add_argument("-o", "--output", help="输出目录")
     parser.add_argument("-f", "--format", default="webp", 
-                       choices=["webp", "jpg", "png", "jpeg"])
+                    choices=["webp", "jpg", "png", "jpeg"])
     parser.add_argument("-q", "--quality", type=int, default=80)
     parser.add_argument("-W", "--width", type=int, help="调整宽度（保持比例）")
     parser.add_argument("-H", "--height", type=int, help="调整高度（保持比例）")
     parser.add_argument("-s", "--sharpness", type=float, default=1.0,
-                       help="锐化强度（1.0为原图，<1.0模糊，>1.0锐化，建议0.5-2.0）")
+                    help="锐化强度（1.0为原图，<1.0模糊，>1.0锐化，建议0.5-2.0）")
     parser.add_argument("--success", type=int, help="成功数量")
     parser.add_argument("--failed", type=int, help="失败数量")
-    
+
     args = parser.parse_args()
 
-    # 收集所有输入文件
-    inputs = []
-    for path in args.input:
-        # 检查路径是否以 @ 开头（表示文件列表）
-        if path.startswith('@'):
-            file_list_path = path[1:]  # 去掉 @ 符号
-            try:
-                with open(file_list_path, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        file_path = line.strip().strip('"')  # 处理带空格的路径
-                        # 递归处理文件列表中的路径（支持文件和目录）
-                        if os.path.isfile(file_path):
-                            if file_path.lower().endswith((".png", ".jpg", ".jpeg")):
-                                inputs.append(file_path)
-                        elif os.path.isdir(file_path):
-                            for root, _, files in os.walk(file_path):
-                                for f in files:
-                                    if f.lower().endswith((".png", ".jpg", ".jpeg")):
-                                        inputs.append(os.path.join(root, f))
-                        else:
-                            print(f"警告：跳过无效路径 {file_path}", file=sys.stderr)
-            except FileNotFoundError:
-                print(f"错误：文件列表 {file_list_path} 不存在", file=sys.stderr)
-                sys.exit(1)
-        else:
-            # 处理普通文件或目录
-            if os.path.isfile(path):
-                if path.lower().endswith((".png", ".jpg", ".jpeg")):
-                    inputs.append(path)
-            elif os.path.isdir(path):
-                for root, _, files in os.walk(path):
-                    for f in files:
-                        if f.lower().endswith((".png", ".jpg", ".jpeg")):
-                            inputs.append(os.path.join(root, f))
+    # 递归解析输入路径（支持文件列表和普通路径）
+    def expand_input_paths(inputs):
+        expanded_paths = []
+        for path in inputs:
+            # 处理文件列表（以 @ 开头）
+            if path.startswith('@'):
+                list_file = path[1:]  # 去掉 @ 符号
+                try:
+                    with open(list_file, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            line = line.strip().strip('"')  # 处理带空格的路径
+                            expanded_paths.extend(expand_input_paths([line]))  # 递归解析
+                except Exception as e:
+                    print(f"错误：无法读取文件列表 {list_file} - {str(e)}", file=sys.stderr)
+                    sys.exit(1)
             else:
-                print(f"警告：跳过无效路径 {path}", file=sys.stderr)
+                expanded_paths.append(path)
+        return expanded_paths
+
+    # 展开所有输入路径（支持嵌套文件列表）
+    expanded_inputs = expand_input_paths(args.input)
+
+    # 收集有效文件
+    inputs = []
+    for path in expanded_inputs:
+        if os.path.isfile(path):
+            if path.lower().endswith((".png", ".jpg", ".jpeg")):
+                inputs.append(path)
+        elif os.path.isdir(path):
+            for root, _, files in os.walk(path):
+                for f in files:
+                    if f.lower().endswith((".png", ".jpg", ".jpeg")):
+                        inputs.append(os.path.join(root, f))
+        else:
+            print(f"警告：跳过无效路径 {path}", file=sys.stderr)
+
+    if not inputs:
+        print("错误：未找到有效的输入文件", file=sys.stderr)
+        sys.exit(1)
 
     # 批量转换
     success_count = 0
@@ -129,9 +132,8 @@ if __name__ == "__main__":
                 filename = f"{os.path.splitext(os.path.basename(input_file))[0]}.{args.format}"
                 output_file = os.path.join(output_dir, filename)
 
-            print(f"\n[{i}/{len(inputs)}] 正在处理: {os.path.basename(input_file)}")
-            print(f"输入路径: {input_file}")
-            print(f"输出路径: {output_file}")
+            # 简化的日志输出
+            print(f"{os.path.basename(input_file)} → {os.path.basename(output_file)}")
 
             result = convert_image(
                 input_file,

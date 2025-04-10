@@ -82,20 +82,39 @@ if __name__ == "__main__":
     # 收集所有输入文件
     inputs = []
     for path in args.input:
-        if os.path.isfile(path):
-            if path.lower().endswith((".png", ".jpg", ".jpeg")):
-                inputs.append(path)
-        elif os.path.isdir(path):
-            for root, _, files in os.walk(path):
-                for f in files:
-                    if f.lower().endswith((".png", ".jpg", ".jpeg")):
-                        inputs.append(os.path.join(root, f))
+        # 检查路径是否以 @ 开头（表示文件列表）
+        if path.startswith('@'):
+            file_list_path = path[1:]  # 去掉 @ 符号
+            try:
+                with open(file_list_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        file_path = line.strip().strip('"')  # 处理带空格的路径
+                        # 递归处理文件列表中的路径（支持文件和目录）
+                        if os.path.isfile(file_path):
+                            if file_path.lower().endswith((".png", ".jpg", ".jpeg")):
+                                inputs.append(file_path)
+                        elif os.path.isdir(file_path):
+                            for root, _, files in os.walk(file_path):
+                                for f in files:
+                                    if f.lower().endswith((".png", ".jpg", ".jpeg")):
+                                        inputs.append(os.path.join(root, f))
+                        else:
+                            print(f"警告：跳过无效路径 {file_path}", file=sys.stderr)
+            except FileNotFoundError:
+                print(f"错误：文件列表 {file_list_path} 不存在", file=sys.stderr)
+                sys.exit(1)
         else:
-            print(f"警告：跳过无效路径 {path}", file=sys.stderr)
-
-    if not inputs:
-        print("错误：未找到有效的输入文件", file=sys.stderr)
-        sys.exit(1)
+            # 处理普通文件或目录
+            if os.path.isfile(path):
+                if path.lower().endswith((".png", ".jpg", ".jpeg")):
+                    inputs.append(path)
+            elif os.path.isdir(path):
+                for root, _, files in os.walk(path):
+                    for f in files:
+                        if f.lower().endswith((".png", ".jpg", ".jpeg")):
+                            inputs.append(os.path.join(root, f))
+            else:
+                print(f"警告：跳过无效路径 {path}", file=sys.stderr)
 
     # 批量转换
     success_count = 0

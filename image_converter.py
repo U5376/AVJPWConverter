@@ -2,7 +2,6 @@ import os
 import sys
 import argparse
 from PIL import Image, ImageEnhance
-from loguru import logger
 
 def convert_image(
     input_path,
@@ -14,15 +13,7 @@ def convert_image(
     sharpness=1.0
 ):
     try:
-        logger.debug(f"开始转换图片: {input_path}")
         img = Image.open(input_path)
-        
-        # 处理图像模式转换
-        if img.mode == 'RGBA' and img_format.lower() in ['jpg', 'jpeg']:
-            logger.debug("RGBA图像转换为RGB模式(JPEG格式需要)")
-            img = img.convert('RGB')
-        elif img.mode == 'P':
-            logger.debug("保持调色板图像原模式")
         
         # 调整大小（保持比例）
         if width or height:
@@ -31,12 +22,17 @@ def convert_image(
             if not height: height = orig_height
             ratio = min(width/orig_width, height/orig_height)
             new_size = (int(orig_width*ratio), int(orig_height*ratio))
-            logger.debug(f"调整大小: {img.size} -> {new_size}")
             img = img.resize(new_size, Image.LANCZOS)
         
+        # 处理图像模式转换
+        if img.mode == 'RGBA' and img_format.lower() in ['jpg', 'jpeg']:
+            print(f"RGBA图像转换为RGB模式(JPEG格式需要)")
+            img = img.convert('RGB')
+        elif img.mode == 'P':
+            print(f"保持调色板图像原模式")
+
         # 锐化处理(跳过调色板图像)
         if sharpness != 1.0 and img.mode != 'P':
-            logger.debug(f"应用锐化: {sharpness}")
             enhancer = ImageEnhance.Sharpness(img)
             img = enhancer.enhance(sharpness)
         
@@ -52,71 +48,35 @@ def convert_image(
         elif img_format == "png":
             save_args["compress_level"] = min(quality//10, 9)
         
-        # 规范化输出路径
-        output_path = os.path.normpath(output_path)
-        output_dir = os.path.dirname(output_path) or '.'  # 处理当前目录情况
+        # 确保输出目录存在
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
         
-        # 确保输出目录存在(仅在需要时创建)
-        if output_dir and not os.path.exists(output_dir):
-            try:
-                os.makedirs(output_dir, exist_ok=True)
-            except Exception as e:
-                logger.error(f"无法创建输出目录: {output_dir}")
-                raise
-        
-        try:
-            # 创建输出目录(如果不存在)
-            os.makedirs(output_dir, exist_ok=True)
-            
-            # 验证目录可写性
-            if not os.path.isdir(output_dir):
-                raise NotADirectoryError(f"输出路径不是目录: {output_dir}")
-                
-            if not os.access(output_dir, os.W_OK):
-                raise PermissionError(f"无写入权限: {output_dir}")
-                
-            # 验证输出文件名有效性
-            if not os.path.basename(output_path):
-                raise ValueError("无效的输出文件名")
-            
-            logger.debug(f"尝试保存到: {output_path}")
-            img.save(output_path, **save_args)
-            
-        except Exception as e:
-            logger.error(f"路径处理失败: {output_path}")
-            raise
-        logger.success(f"成功转换: {output_path}")
-        return True
+        img.save(output_path, **save_args)
+        return {
+            'success': True,
+            'mode': img.mode,
+            'total': 1,  # 单次转换总是1
+            'converted': 1  # 成功转换计数
+        }
     except Exception as e:
-        error_type = type(e).__name__
-        if "cannot filter palette images" in str(e):
-            logger.error(f"调色板图像转换失败，请手动处理: {input_path}")
-        elif "corrupt image" in str(e):
-            logger.error(f"损坏的图像文件: {input_path}")
-        else:
-            logger.error(f"转换失败 ({error_type}): {input_path}")
-            logger.exception(e)  # 输出完整错误堆栈
+        print(f"Error converting {input_path}: {str(e)}", file=sys.stderr)
         return False
 
 if __name__ == "__main__":
-    # 配置logger
-    logger.remove()
-    logger.add(sys.stderr, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{message}</cyan>")
-
     parser = argparse.ArgumentParser(description="CLI Image Converter (支持多文件/目录)")
     parser.add_argument("-i", "--input", nargs='+', required=True,
-                      help="输入文件或目录（支持多个路径）")
-    parser.add_argument("--input-list", action="store_true",
-                      help=argparse.SUPPRESS)  # 隐藏参数，内部使用
+                       help="输入文件或目录（支持多个路径）")
     parser.add_argument("-o", "--output", help="输出目录")
     parser.add_argument("-f", "--format", default="webp", 
-                      choices=["webp", "jpg", "png", "jpeg"])
+                       choices=["webp", "jpg", "png", "jpeg"])
     parser.add_argument("-q", "--quality", type=int, default=80)
     parser.add_argument("-W", "--width", type=int, help="调整宽度（保持比例）")
     parser.add_argument("-H", "--height", type=int, help="调整高度（保持比例）")
     parser.add_argument("-s", "--sharpness", type=float, default=1.0,
                        help="锐化强度（1.0为原图，<1.0模糊，>1.0锐化，建议0.5-2.0）")
-
+    parser.add_argument("--success", type=int, help="成功数量")
+    parser.add_argument("--failed", type=int, help="失败数量")
+    
     args = parser.parse_args()
 
     # 收集所有输入文件
@@ -129,16 +89,14 @@ if __name__ == "__main__":
             for root, _, files in os.walk(path):
                 for f in files:
                     if f.lower().endswith((".png", ".jpg", ".jpeg")):
-                        full_path = os.path.join(root, f)
-                        inputs.append(full_path)
+                        inputs.append(os.path.join(root, f))
         else:
-            logger.warning(f"跳过无效路径: {path}")
+            print(f"警告：跳过无效路径 {path}", file=sys.stderr)
 
     if not inputs:
-        logger.error("错误：未找到有效的输入文件")
+        print("错误：未找到有效的输入文件", file=sys.stderr)
         sys.exit(1)
 
-    logger.info(f"共找到 {len(inputs)} 个待转换文件")
     # 批量转换
     success_count = 0
     for i, input_file in enumerate(inputs, 1):
@@ -152,9 +110,11 @@ if __name__ == "__main__":
                 filename = f"{os.path.splitext(os.path.basename(input_file))[0]}.{args.format}"
                 output_file = os.path.join(output_dir, filename)
 
-            logger.info(f"{os.path.basename(input_file)} → {os.path.basename(output_file)}")
+            print(f"\n[{i}/{len(inputs)}] 正在处理: {os.path.basename(input_file)}")
+            print(f"输入路径: {input_file}")
+            print(f"输出路径: {output_file}")
 
-            if convert_image(
+            result = convert_image(
                 input_file,
                 output_file,
                 args.format,
@@ -162,12 +122,14 @@ if __name__ == "__main__":
                 args.width,
                 args.height,
                 args.sharpness
-            ):
+            )
+            if result and result.get('success'):
                 success_count += 1
+                print(f"状态: 成功 (模式: {result['mode']})")  # 修复img_mode未定义的问题
             else:
-                logger.error(f"状态: 失败")
+                print("状态: 失败")
         except Exception as e:
-            logger.exception(f"处理异常: {str(e)}")
+            print(f"处理异常: {str(e)}")
 
-    logger.info(f"图片转换成功: {success_count}/{len(inputs)}")
-    logger.info(f"失败数量: {len(inputs) - success_count}")
+    print(f"\n转换完成: 成功 {success_count}/{len(inputs)}")
+    print(f"失败数量: {len(inputs) - success_count}")

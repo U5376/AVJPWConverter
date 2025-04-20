@@ -87,7 +87,20 @@ def expand_input_paths(inputs):
             expanded_paths.append(os.path.normpath(path))  # 处理普通路径
     return expanded_paths
 
+def set_low_priority():
+    """将进程/线程优先级设置为较低"""
+    try:
+        if sys.platform.startswith('win'):
+            import psutil
+            p = psutil.Process(os.getpid())
+            p.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+        else:
+            os.nice(10)
+    except Exception as e:
+        print(f"警告：无法设置低优先级: {e}", file=sys.stderr)
+
 def process_single_image(i, input_file, total, args):
+    set_low_priority()
     try:
         input_path = os.path.abspath(input_file)
         if not os.path.exists(input_path):
@@ -132,8 +145,12 @@ if __name__ == "__main__":
     parser.add_argument("-H", "--height", type=int, help="调整高度（保持比例）")
     parser.add_argument("-s", "--sharpness", type=float, default=1.0,
                        help="锐化强度（默认 1.0，<1.0 模糊，>1.0 锐化，建议 0.5-2.0）")
+    parser.add_argument("--workers", "-w", type=int, default=2,
+                       help="并发线程数，默认2")
     
     args = parser.parse_args()
+
+    set_low_priority()
 
     # 递归解析输入路径
     expanded_inputs = expand_input_paths(args.input)
@@ -158,7 +175,7 @@ if __name__ == "__main__":
     # 多线程批量转换
     success_count = 0
     total = len(inputs)
-    max_workers = min(8, total)  # 可根据需要调整线程数
+    max_workers = max(1, args.workers)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [

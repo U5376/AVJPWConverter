@@ -2,6 +2,7 @@ import os
 import sys
 import argparse
 from PIL import Image, ImageEnhance
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def convert_image(
     input_path,
@@ -86,6 +87,39 @@ def expand_input_paths(inputs):
             expanded_paths.append(os.path.normpath(path))  # 处理普通路径
     return expanded_paths
 
+def process_single_image(i, input_file, total, args):
+    try:
+        input_path = os.path.abspath(input_file)
+        if not os.path.exists(input_path):
+            raise FileNotFoundError(f"输入文件 {input_path} 不存在")
+
+        if args.output:
+            output_dir = os.path.abspath(args.output)
+            filename = f"{os.path.splitext(os.path.basename(input_file))[0]}.{args.format}"
+            output_file = os.path.join(output_dir, filename)
+        else:
+            output_dir = os.path.dirname(input_path) or os.getcwd()
+            filename = f"{os.path.splitext(os.path.basename(input_file))[0]}.{args.format}"
+            output_file = os.path.join(output_dir, filename)
+
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+
+        print(f"[{i}/{total}] {os.path.basename(input_file)} → {os.path.basename(output_file)}")
+
+        result = convert_image(
+            input_path,
+            output_file,
+            args.format,
+            args.quality,
+            args.width,
+            args.height,
+            args.sharpness
+        )
+        return (input_file, result)
+    except Exception as e:
+        print(f"严重异常：{str(e)}")
+        return (input_file, {'success': False, 'error': str(e)})
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="CLI Image Converter (支持多文件/目录)")
     parser.add_argument("-i", "--input", nargs='+', required=True,
@@ -121,48 +155,22 @@ if __name__ == "__main__":
         print("错误：未找到有效的输入文件", file=sys.stderr)
         sys.exit(1)
 
-    # 批量转换
+    # 多线程批量转换
     success_count = 0
-    for i, input_file in enumerate(inputs, 1):
-        try:
-            # 将输入文件转为绝对路径
-            input_path = os.path.abspath(input_file)
-            if not os.path.exists(input_path):
-                raise FileNotFoundError(f"输入文件 {input_path} 不存在")
+    total = len(inputs)
+    max_workers = min(8, total)  # 可根据需要调整线程数
 
-            # 生成输出路径
-            if args.output:
-                # 用户指定了输出目录
-                output_dir = os.path.abspath(args.output)
-                filename = f"{os.path.splitext(os.path.basename(input_file))[0]}.{args.format}"
-                output_file = os.path.join(output_dir, filename)
-            else:
-                # 使用输入文件所在目录
-                output_dir = os.path.dirname(input_path) or os.getcwd()
-                filename = f"{os.path.splitext(os.path.basename(input_file))[0]}.{args.format}"
-                output_file = os.path.join(output_dir, filename)
-
-            # 确保输出目录存在
-            os.makedirs(os.path.dirname(output_file), exist_ok=True)
-            # 显示转换进度
-            print(f"[{i}/{len(inputs)}] {os.path.basename(input_file)} → {os.path.basename(output_file)}")
-
-            # 执行转换
-            result = convert_image(
-                input_path,  # 使用绝对路径 input_path
-                output_file,
-                args.format,
-                args.quality,
-                args.width,
-                args.height,
-                args.sharpness
-            )
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(process_single_image, i+1, input_file, total, args)
+            for i, input_file in enumerate(inputs)
+        ]
+        for future in as_completed(futures):
+            input_file, result = future.result()
             if result.get('success'):
                 success_count += 1
             else:
-                print(f"失败：{result.get('error', '未知错误')}")
-        except Exception as e:
-            print(f"严重异常：{str(e)}")
+                print(f"失败：{os.path.basename(input_file)} - {result.get('error', '未知错误')}")
 
     print(f"\n转换完成: 成功 {success_count}/{len(inputs)}")
     print(f"失败数量: {len(inputs) - success_count}")

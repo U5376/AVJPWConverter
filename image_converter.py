@@ -158,12 +158,12 @@ if __name__ == "__main__":
     # 收集有效文件
     inputs = []
     for path in expanded_inputs:
-        if os.path.isfile(path) and path.lower().endswith((".png", ".jpg", ".jpeg")):
+        if os.path.isfile(path) and path.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
             inputs.append(path)
         elif os.path.isdir(path):
             for root, _, files in os.walk(path):
                 for f in files:
-                    if f.lower().endswith((".png", ".jpg", ".jpeg")):
+                    if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
                         inputs.append(os.path.join(root, f))
         else:
             print(f"警告：跳过无效路径 {path}", file=sys.stderr)

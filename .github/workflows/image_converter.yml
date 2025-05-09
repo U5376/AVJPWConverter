@@ -19,7 +19,7 @@ jobs:
 
     - name: 安装依赖
       run: |
-        pip install nuitka
+        pip install nuitka==2.6.9
         pip install pillow
 
     - name: 编译EXE文件

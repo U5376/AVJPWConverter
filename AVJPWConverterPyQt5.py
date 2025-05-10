@@ -14,7 +14,6 @@ from PyQt5.QtWidgets import (
     QFileDialog, QVBoxLayout, QWidget, QLabel, QComboBox, QSpinBox,
     QHBoxLayout, QFormLayout, QGroupBox, QTableWidget, QTableWidgetItem,
     QDialog, QHeaderView, QCheckBox, QGridLayout, QDoubleSpinBox)
-# 新增导入
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import psutil
@@ -64,6 +63,7 @@ conversion_stopped = False  # 新增全局停止标志
 def process_file(file, output_dir, img_format, quality, compress, height, width,
                 delete_original, adjust_height, adjust_width, sharpness, 
                 preserve_metadata, log, collect_log=None):
+    logs = []
     try:
         # 使用 pathlib 处理路径
         file_path = Path(file)
@@ -74,10 +74,7 @@ def process_file(file, output_dir, img_format, quality, compress, height, width,
         if img_format in ["jpg", "jpeg"] and image.mode == 'RGBA':
             image = image.convert('RGB')
             msg = f"图像 {file_name} 的 Alpha 通道已被移除，转换为 RGB 模式"
-            if collect_log is not None:
-                collect_log.append(msg)
-            else:
-                log.info(msg)
+            logs.append(msg)
 
         # 如果需要调整高度或宽度，则调整图像大小，保持纵横比，不放大较小的图片
         if (adjust_height and image.height > height) or (adjust_width and image.width > width):
@@ -121,7 +118,11 @@ def process_file(file, output_dir, img_format, quality, compress, height, width,
 
         # 变换图像并保存
         if img_format in ["jpg", "jpeg", "webp", "avif"]:
-            image.save(str(new_file_path), quality=quality)
+            if img_format == "webp":
+                # UI传递quality，method始终最高
+                image.save(str(new_file_path), quality=quality, method=6)
+            else:
+                image.save(str(new_file_path), quality=quality)
         elif img_format == "png":
             image.save(str(new_file_path), compress_level=compress)
 
@@ -131,24 +132,18 @@ def process_file(file, output_dir, img_format, quality, compress, height, width,
             os.utime(str(new_file_path), (original_stat.st_atime, original_stat.st_mtime))
 
         msg = f"{new_file_path.name:<50} 成功转换为 {img_format} 格式！"
-        if collect_log is not None:
-            collect_log.append(msg)
-        else:
-            log.info(msg)
+        logs.append(msg)
 
         # 如果选择了删除原文件，则删除
         if delete_original:
             absolute_path = str(file_path.resolve())  # 获取绝对路径来删除，避免报错
             send2trash(absolute_path)  # 将文件放入回收站
 
-        return True
+        return True, logs
     except Exception as e:
         msg = f"转换 {file} 失败。错误原因: {e}"
-        if collect_log is not None:
-            collect_log.append(msg)
-        else:
-            log.error(msg)
-        return False
+        logs.append(msg)
+        return False, logs
 
 def run_conversion(input_files, output_dir, img_format, quality, compress, height, width,
                    delete_original, adjust_height, adjust_width, sharpness, pause_event,
@@ -201,40 +196,39 @@ def run_conversion(input_files, output_dir, img_format, quality, compress, heigh
         max_workers = max(1, max_workers)
         log.info(f"使用线程数: {max_workers}")
 
-        # --- 实时日志输出，允许乱序，但每条日志带文件名 ---
         progress = [None] * total_files
 
         def file_task(idx, file):
             # 检查暂停/停止
             while not pause_event.is_set():
                 if stop_event.is_set():
-                    return 'stopped', idx, file
+                    return 'stopped', idx, file, []
                 time.sleep(0.1)
             if stop_event.is_set():
-                return 'stopped', idx, file
+                return 'stopped', idx, file, []
             try_count = 0
             max_try = 3
             while try_count < max_try:
                 if stop_event.is_set():
-                    return 'stopped', idx, file
+                    return 'stopped', idx, file, []
                 try:
-                    ok = process_file(file, output_dir, img_format, quality, compress, height, width,
+                    ok, logs = process_file(file, output_dir, img_format, quality, compress, height, width,
                         delete_original, adjust_height, adjust_width, sharpness, preserve_metadata, log)
-                    return ok, idx, file
+                    return ok, idx, file, logs
                 except Exception as e:
-                    log.error(f"转换 {file} 失败。错误原因: {e}")
+                    logs = [f"转换 {file} 失败。错误原因: {e}"]
                     try_count += 1
                     time.sleep(1)
-            return False, idx, file
+            return False, idx, file, logs
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_idx = {}
-            for idx, file in enumerate(files):
-                future = executor.submit(file_task, idx, file)
-                future_to_idx[future] = idx
 
-            for future in as_completed(future_to_idx):
-                ok, idx, file = future.result()
+            # --- 顺序输出日志 ---
+            results = executor.map(lambda args: file_task(*args), enumerate(files))
+            for idx, (ok, idx2, file, logs) in enumerate(results):
+                # 顺序输出日志
+                for msg in logs:
+                    log.info(msg)
                 progress[idx] = ok
                 completed_count = sum(1 for v in progress if v is True)
                 failed_count = sum(1 for v in progress if v is False)
@@ -512,7 +506,7 @@ class MainWindow(QMainWindow):
             self.quality_label.setText('WebP质量:')
             self.quality_spin.setRange(0, 100)
             self.quality_spin.setValue(80)
-            self.quality_spin.setToolTip("WebP 质量 (0-100，默认值为 80)")
+            self.quality_spin.setToolTip("WebP 质量 (0-100，默认值为 80) 默认最高压缩等级6")
 
         elif text == 'avif':
             self.quality_label.setText('AVIF质量:')

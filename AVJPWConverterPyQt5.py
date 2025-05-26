@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import psutil
 import multiprocessing
+import configparser
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -62,7 +63,7 @@ conversion_stopped = False  # 新增全局停止标志
 
 def process_file(file, output_dir, img_format, quality, compress, height, width,
                 delete_original, adjust_height, adjust_width, sharpness, 
-                preserve_metadata, log, collect_log=None):
+                preserve_metadata, log, collect_log=None, method=None, speed=None):
     logs = []
     try:
         # 使用 pathlib 处理路径
@@ -119,8 +120,11 @@ def process_file(file, output_dir, img_format, quality, compress, height, width,
         # 变换图像并保存
         if img_format in ["jpg", "jpeg", "webp", "avif"]:
             if img_format == "webp":
-                # UI传递quality，method始终最高
-                image.save(str(new_file_path), quality=quality, method=6)
+                # 自定义method为6 最优最慢1-6 原值默认4
+                image.save(str(new_file_path), quality=quality, method=method if method is not None else 6)
+            elif img_format == "avif":
+                # 自定义speed为4 最优最慢0-10 原值默认6
+                image.save(str(new_file_path), quality=quality, speed=speed if speed is not None else 4)
             else:
                 image.save(str(new_file_path), quality=quality)
         elif img_format == "png":
@@ -131,7 +135,8 @@ def process_file(file, output_dir, img_format, quality, compress, height, width,
             original_stat = file_path.stat()
             os.utime(str(new_file_path), (original_stat.st_atime, original_stat.st_mtime))
 
-        msg = f"{new_file_path.name:<50} 成功转换为 {img_format} 格式！"
+        # 转换日志
+        msg = f"{file_path.name:<50} 成功转为{img_format}"
         logs.append(msg)
 
         # 如果选择了删除原文件，则删除
@@ -148,7 +153,7 @@ def process_file(file, output_dir, img_format, quality, compress, height, width,
 def run_conversion(input_files, output_dir, img_format, quality, compress, height, width,
                    delete_original, adjust_height, adjust_width, sharpness, pause_event,
                    stop_event, log, progress_label, preserve_metadata, on_finished,
-                   thread_count=None):
+                   thread_count=None, method=None, speed=None):
     global conversion_stopped
     conversion_stopped = False
 
@@ -213,7 +218,8 @@ def run_conversion(input_files, output_dir, img_format, quality, compress, heigh
                     return 'stopped', idx, file, []
                 try:
                     ok, logs = process_file(file, output_dir, img_format, quality, compress, height, width,
-                        delete_original, adjust_height, adjust_width, sharpness, preserve_metadata, log)
+                        delete_original, adjust_height, adjust_width, sharpness, preserve_metadata, log,
+                        method=method, speed=speed)
                     return ok, idx, file, logs
                 except Exception as e:
                     logs = [f"转换 {file} 失败。错误原因: {e}"]
@@ -252,7 +258,7 @@ class MainWindow(QMainWindow):
         self.convert_thread = None  # 添加线程引用
 
         self.setWindowTitle("AVJPWConverter PyQt5")
-        self.setGeometry(100, 100, 580, 620)
+        self.setGeometry(100, 100, 515, 620)
 
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
@@ -285,11 +291,14 @@ class MainWindow(QMainWindow):
         input_layout = QFormLayout()
         self.input_button = make_btn("选择输入文件", self.select_input_files, 90)
         self.input_dir_button = make_btn("选择输入文件夹", self.select_input_dir, 100)
+        self.show_list_button = make_btn("显示文件列表", self.show_file_list, 90)
         self.input_line = DraggableLineEdit()
         self.input_line.setPlaceholderText("拖放文件到此处")
         button_layout = QHBoxLayout()
         button_layout.addWidget(self.input_button)
         button_layout.addWidget(self.input_dir_button)
+        button_layout.addStretch()
+        button_layout.addWidget(self.show_list_button)  # 靠右
         input_layout.addRow(button_layout)
         input_path_layout = QHBoxLayout()
         input_path_layout.addWidget(make_label("输入路径:"))
@@ -301,6 +310,7 @@ class MainWindow(QMainWindow):
         output_group = QGroupBox("输出选项")
         output_layout = QFormLayout()
         self.output_button = make_btn("选择输出路径", self.select_output_dir, 90)
+        self.open_output_button = make_btn("打开输出文件夹", self.open_output_folder, 100)
         self.output_line = DraggableLineEdit()
         self.output_line.setPlaceholderText("拖放文件夹到此处")
         self.cpu_combo = QComboBox()
@@ -308,9 +318,10 @@ class MainWindow(QMainWindow):
         self.cpu_combo.addItems([str(i) for i in range(1, cpu_count+1)])
         self.cpu_combo.setCurrentText(str(cpu_count))
         self.cpu_combo.setFixedWidth(30)
-        cpu_label = make_label("线程:")
+        cpu_label = make_label("线程")
         output_top_layout = QHBoxLayout()
         output_top_layout.addWidget(self.output_button)
+        output_top_layout.addWidget(self.open_output_button)  # 放在选择输出路径按钮后
         output_top_layout.addStretch()
         output_top_layout.addWidget(cpu_label)
         output_top_layout.addWidget(self.cpu_combo)
@@ -329,11 +340,49 @@ class MainWindow(QMainWindow):
         self.format_combo.setCurrentText('avif')
         self.format_combo.currentTextChanged.connect(self.update_quality_label)
         self.format_combo.setFixedWidth(50)
-        self.quality_label = QLabel("AVIF质量:")
+        self.quality_label = QLabel("AVIF质量")
         self.quality_spin = make_spinbox(1, 63, 63, tooltip="AVIF 质量 (1-63，默认值为 63)")
-        quality_layout = QHBoxLayout()
-        quality_layout.addWidget(self.quality_label)
-        quality_layout.addWidget(self.quality_spin)
+
+        # 新增 method/speed 下拉框
+        self.method_label = QLabel("method")
+        self.method_combo = QComboBox()
+        self.method_combo.addItems([str(i) for i in range(0, 7)])
+        self.method_combo.setCurrentText("6")
+        self.method_combo.setFixedWidth(40)
+        self.method_combo.setToolTip("0-6 默认6 1-6越大压缩越慢越优 原值默认4")
+        self.method_label.setVisible(False)
+        self.method_combo.setVisible(False)
+
+        self.speed_label = QLabel("speed")
+        self.speed_combo = QComboBox()
+        self.speed_combo.addItems([str(i) for i in range(0, 11)])
+        self.speed_combo.setCurrentText("4")
+        self.speed_combo.setFixedWidth(40)
+        self.speed_combo.setToolTip("0-10 默认4 0最慢最优 原值默认6 推介2-4")
+        self.speed_label.setVisible(False)
+        self.speed_combo.setVisible(False)
+
+        # 删除原文件、保留元数据、method/speed下拉框
+        self.delete_original_checkbox = QCheckBox("转换后删除原文件")
+        self.delete_original_checkbox.setChecked(False)
+        self.preserve_metadata_checkbox = QCheckBox("保留修改时间")
+        self.preserve_metadata_checkbox.setChecked(True)
+        combined_layout = QHBoxLayout()
+        combined_layout.addWidget(self.delete_original_checkbox)
+        combined_layout.addSpacing(8)
+        combined_layout.addWidget(self.preserve_metadata_checkbox)
+        # 新增：method/speed 下拉框放到复选框右侧
+        combined_layout.addSpacing(32)
+        combined_layout.addWidget(self.method_label)
+        combined_layout.addWidget(self.method_combo)
+        combined_layout.addWidget(self.speed_label)
+        combined_layout.addWidget(self.speed_combo)
+        format_layout.addLayout(combined_layout, 0, 1, 1, 3, Qt.AlignLeft)
+        format_group.setLayout(format_layout)
+        # 保存 combined_layout 到 self 以便后续访问
+        self.combined_layout = combined_layout
+        self.format_group = format_group
+
         # 高宽选项
         dimension_layout = QHBoxLayout()
         self.height_checkbox = QCheckBox("图片高度")
@@ -349,47 +398,44 @@ class MainWindow(QMainWindow):
         dimension_layout.addWidget(self.height_spin)
         dimension_layout.addWidget(self.width_checkbox)
         dimension_layout.addWidget(self.width_spin)
-        format_combo_layout = QHBoxLayout()
-        format_combo_layout.addWidget(QLabel("图片格式:"))
-        format_combo_layout.addWidget(self.format_combo)
-        format_layout.addLayout(format_combo_layout, 0, 0, 1, 1, Qt.AlignLeft)
-        format_layout.addLayout(quality_layout, 1, 0, 1, 1, Qt.AlignLeft)
-        format_layout.addLayout(dimension_layout, 1, 1, 1, 1, Qt.AlignLeft)
-        # 锐化、删除原文件、保留元数据
-        sharpness_layout = QHBoxLayout()
+        # 锐化相关下拉框
         sharpness_label = QLabel("锐化")
         self.sharpness_spin = QDoubleSpinBox()
         self.sharpness_spin.setRange(-2.0, 3.0)
         self.sharpness_spin.setSingleStep(0.1)
         self.sharpness_spin.setValue(1.0)
         self.sharpness_spin.setToolTip("1.0不处理,范围:负2-3(1.7-8有效减轻avif格式彩色CG眼睛线条糊化)")
-        sharpness_layout.addWidget(sharpness_label)
-        sharpness_layout.addWidget(self.sharpness_spin)
-        self.delete_original_checkbox = QCheckBox("转换后删除原文件")
-        self.delete_original_checkbox.setChecked(False)
-        self.preserve_metadata_checkbox = QCheckBox("保留修改时间")
-        self.preserve_metadata_checkbox.setChecked(True)
-        combined_layout = QHBoxLayout()
-        combined_layout.addWidget(self.delete_original_checkbox)
-        combined_layout.addSpacing(8)
-        combined_layout.addWidget(self.preserve_metadata_checkbox)
-        combined_layout.addLayout(sharpness_layout)
-        format_layout.addLayout(combined_layout, 0, 1, 1, 3, Qt.AlignLeft)
-        format_group.setLayout(format_layout)
+        dimension_layout.addWidget(sharpness_label)
+        dimension_layout.addWidget(self.sharpness_spin)
+        # 质量下拉框
+        quality_layout = QHBoxLayout()
+        quality_layout.addWidget(self.quality_label)
+        quality_layout.addWidget(self.quality_spin)
+        # 图片格式下拉框
+        format_combo_layout = QHBoxLayout()
+        format_combo_layout.addWidget(QLabel("图片格式"))
+        format_combo_layout.addWidget(self.format_combo)
+        # 三个元件位置
+        format_layout.addLayout(format_combo_layout, 0, 0, 1, 1, Qt.AlignLeft)
+        format_layout.addLayout(quality_layout, 1, 0, 1, 1, Qt.AlignLeft)
+        format_layout.addLayout(dimension_layout, 1, 1, 1, 1, Qt.AlignLeft)
 
         # 控制选项
         control_group = QGroupBox("控制选项")
         control_layout = QHBoxLayout()
+        control_layout.setSpacing(0)
+        control_layout.setSpacing(10)
+        control_layout.setAlignment(Qt.AlignLeft)
         self.convert_button = make_btn("开始转换", self.convert_images, 70)
         self.pause_button = make_btn("暂停/继续", self.pause_conversion, 70)
         self.stop_button = make_btn("停止", self.stop_conversion, 70)
         self.stop_event = threading.Event()
         self.clear_input_signal.connect(self.clear_input_line)
+        self.save_settings_button = make_btn("保存设置", self.save_settings, 70)
+        self.reset_settings_button = make_btn("重置设置", self.reset_settings, 70)
         self.clear_log_button = make_btn("清空日志", self.clear_log, 70)
-        self.show_list_button = make_btn("显示文件列表", self.show_file_list, 100)
-        self.open_output_button = make_btn("打开输出文件夹", self.open_output_folder, 120)
         for btn in [self.convert_button, self.pause_button, self.stop_button,
-                    self.show_list_button, self.open_output_button, self.clear_log_button]:
+                    self.save_settings_button, self.reset_settings_button, self.clear_log_button]:
             control_layout.addWidget(btn)
         control_group.setLayout(control_layout)
 
@@ -423,19 +469,44 @@ class MainWindow(QMainWindow):
         handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s', datefmt='%H:%M:%S'))
         self.log.handlers = [handler]
 
+        self.config_path = str(Path(__file__).parent / "config.ini")
+        self.config = configparser.ConfigParser()
+        self.load_settings()  # 启动时加载设置
+        self.update_quality_label(self.format_combo.currentText())  # 初始化时同步显示
+
+    def toggle_method_speed(self, text):
+        """根据格式显示/隐藏 method/speed 下拉框"""
+        self.method_label.setVisible(False)
+        self.method_combo.setVisible(False)
+        self.speed_label.setVisible(False)
+        self.speed_combo.setVisible(False)
+
+        if text == 'webp':
+            self.method_label.setVisible(True)
+            self.method_combo.setVisible(True)
+        elif text == 'avif':
+            self.speed_label.setVisible(True)
+            self.speed_combo.setVisible(True)
+
+        # 强制刷新布局（防止 AttributeError）
+        if hasattr(self, "combined_layout"):
+            self.combined_layout.update()
+        if hasattr(self, "format_group"):
+            self.format_group.adjustSize()
+
     def toggle_height_spin(self, state):
-        if state == Qt.Checked:
+        if (state == Qt.Checked):
             self.height_spin.setEnabled(True)  # 启用高度调整
         else:
             self.height_spin.setEnabled(False)  # 禁用高度调整
-            self.height_spin.setValue(768)  # 选择默认高度
+            self.height_spin.setValue(768)  # 默认高度
 
     def toggle_width_spin(self, state):
-        if state == Qt.Checked:
-            self.width_spin.setEnabled(True)  # 启用宽度调整
+        if (state == Qt.Checked):
+            self.width_spin.setEnabled(True)
         else:
-            self.width_spin.setEnabled(False)  # 禁用宽度调整
-            self.width_spin.setValue(1500)  # 选择默认宽度
+            self.width_spin.setEnabled(False)
+            self.width_spin.setValue(1500)  # 默认宽度
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
@@ -491,28 +562,29 @@ class MainWindow(QMainWindow):
 
     def update_quality_label(self, text):
         if text == 'jpg':
-            self.quality_label.setText('JPEG质量:')
+            self.quality_label.setText('JPEG质量')
             self.quality_spin.setRange(1, 100)
             self.quality_spin.setValue(90)
             self.quality_spin.setToolTip("JPEG 质量范围：1-100，默认90")
 
         elif text == 'png':
-            self.quality_label.setText('PNG压缩:')
+            self.quality_label.setText('PNG压缩')
             self.quality_spin.setRange(0, 9)
             self.quality_spin.setValue(6)
             self.quality_spin.setToolTip("PNG 压缩级别 (0-9，默认值为 6")
 
         elif text == 'webp':
-            self.quality_label.setText('WebP质量:')
+            self.quality_label.setText('WebP质量')
             self.quality_spin.setRange(0, 100)
             self.quality_spin.setValue(80)
             self.quality_spin.setToolTip("WebP 质量 (0-100，默认值为 80) 默认最高压缩等级6")
 
         elif text == 'avif':
-            self.quality_label.setText('AVIF质量:')
+            self.quality_label.setText('AVIF质量')
             self.quality_spin.setRange(1, 63)
             self.quality_spin.setValue(63)
             self.quality_spin.setToolTip("AVIF 质量 (1-63，默认值为 63)")
+        self.toggle_method_speed(text)  # 保证切换格式时method/speed显示状态同步
 
     def convert_images(self):
         if self.input_line.text() == '':
@@ -537,6 +609,10 @@ class MainWindow(QMainWindow):
             sharpness = self.sharpness_spin.value()  # 获取锐化因子
             preserve_metadata = self.preserve_metadata_checkbox.isChecked() # 保留原数据
             thread_count = int(self.cpu_combo.currentText())
+
+            # method/speed 参数
+            method = int(self.method_combo.currentText()) if img_format == 'webp' else None
+            speed = int(self.speed_combo.currentText()) if img_format == 'avif' else None
 
             if (img_format == 'png'):
                 compress = min(compress, 9)  # 限制压缩级别最大为9
@@ -571,7 +647,9 @@ class MainWindow(QMainWindow):
                           self.clear_input_signal.emit(),
                           delattr(self, 'convert_thread')  # 转换完成后清理线程引用
                       ],
-                      thread_count
+                      thread_count,
+                      method,  # 新增参数
+                      speed    # 新增参数
                 )
             )
             self.convert_thread.start()
@@ -666,6 +744,71 @@ class MainWindow(QMainWindow):
 
         file_list_dialog.setLayout(layout)
         file_list_dialog.exec_()
+
+    def save_settings(self):
+        """保存当前设置到ini文件"""
+        self.config['Main'] = {
+            'format': self.format_combo.currentText(),
+            'quality': str(self.quality_spin.value()),
+            'height': str(self.height_spin.value()),
+            'width': str(self.width_spin.value()),
+            'height_checked': str(self.height_checkbox.isChecked()),
+            'width_checked': str(self.width_checkbox.isChecked()),
+            'sharpness': str(self.sharpness_spin.value()),
+            'delete_original': str(self.delete_original_checkbox.isChecked()),
+            'preserve_metadata': str(self.preserve_metadata_checkbox.isChecked()),
+            'cpu_threads': self.cpu_combo.currentText(),
+            'method': self.method_combo.currentText(),
+            'speed': self.speed_combo.currentText()
+        }
+        with open(self.config_path, 'w', encoding='utf-8') as configfile:
+            self.config.write(configfile)
+        self.log.info("设置已保存到 settings.ini")
+
+    def load_settings(self):
+        """加载ini文件设置"""
+        if not os.path.exists(self.config_path):
+            return
+        self.config.read(self.config_path, encoding='utf-8')
+        if 'Main' not in self.config:
+            return
+        s = self.config['Main']
+        fmt = s.get('format', 'avif')
+        idx = self.format_combo.findText(fmt)
+        if idx >= 0:
+            self.format_combo.setCurrentIndex(idx)
+        self.quality_spin.setValue(int(s.get('quality', self.quality_spin.value())))
+        self.height_spin.setValue(int(s.get('height', self.height_spin.value())))
+        self.width_spin.setValue(int(s.get('width', self.width_spin.value())))
+        self.height_checkbox.setChecked(s.get('height_checked', 'True') == 'True')
+        self.width_checkbox.setChecked(s.get('width_checked', 'False') == 'True')
+        self.sharpness_spin.setValue(float(s.get('sharpness', self.sharpness_spin.value())))
+        self.delete_original_checkbox.setChecked(s.get('delete_original', 'False') == 'True')
+        self.preserve_metadata_checkbox.setChecked(s.get('preserve_metadata', 'True') == 'True')
+        cpu_idx = self.cpu_combo.findText(s.get('cpu_threads', self.cpu_combo.currentText()))
+        if cpu_idx >= 0:
+            self.cpu_combo.setCurrentIndex(cpu_idx)
+        self.method_combo.setCurrentText(s.get('method', '6'))
+        self.speed_combo.setCurrentText(s.get('speed', '4'))
+        self.log.info("设置已从 settings.ini 加载")
+
+    def reset_settings(self):
+        """重置为默认设置"""
+        self.input_line.clear()
+        self.output_line.clear()
+        self.format_combo.setCurrentText('avif')
+        self.quality_spin.setValue(63)
+        self.height_spin.setValue(768)
+        self.width_spin.setValue(1500)
+        self.height_checkbox.setChecked(True)
+        self.width_checkbox.setChecked(False)
+        self.sharpness_spin.setValue(1.0)
+        self.delete_original_checkbox.setChecked(False)
+        self.preserve_metadata_checkbox.setChecked(True)
+        self.cpu_combo.setCurrentText(str(multiprocessing.cpu_count()))
+        self.method_combo.setCurrentText("6")
+        self.speed_combo.setCurrentText("4")
+        self.log.info("设置已重置为默认值")
 
 if __name__ == "__main__":
     app = QApplication([])

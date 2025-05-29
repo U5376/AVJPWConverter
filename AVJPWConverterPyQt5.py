@@ -349,7 +349,7 @@ class MainWindow(QMainWindow):
         self.method_combo.addItems([str(i) for i in range(0, 7)])
         self.method_combo.setCurrentText("6")
         self.method_combo.setFixedWidth(40)
-        self.method_combo.setToolTip("0-6 默认6 1-6越大压缩越慢越优 原值默认4")
+        self.method_combo.setToolTip("1-6 默认6 越大压缩越慢越优 原值默认4")
         self.method_label.setVisible(False)
         self.method_combo.setVisible(False)
 
@@ -577,7 +577,7 @@ class MainWindow(QMainWindow):
             self.quality_label.setText('WebP质量')
             self.quality_spin.setRange(0, 100)
             self.quality_spin.setValue(80)
-            self.quality_spin.setToolTip("WebP 质量 (0-100，默认值为 80) 默认最高压缩等级6")
+            self.quality_spin.setToolTip("WebP 质量 (0-100，默认值为 80)")
 
         elif text == 'avif':
             self.quality_label.setText('AVIF质量')

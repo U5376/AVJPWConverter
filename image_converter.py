@@ -11,7 +11,8 @@ def convert_image(
     quality=85,
     width=None,
     height=None,
-    sharpness=1.0
+    sharpness=1.0,
+    method=6
 ):
     try:
         # 检查输入文件是否存在
@@ -54,7 +55,12 @@ def convert_image(
         
         # 保存参数
         save_args = {}
-        if img_format in ["jpg", "jpeg", "webp"]:
+        if img_format == "webp":
+            save_args.update({
+                "quality": quality,
+                "method": method
+            })
+        elif img_format in ["jpg", "jpeg"]:
             save_args["quality"] = quality
         elif img_format == "png":
             save_args["compress_level"] = min(quality//10, 9)
@@ -126,7 +132,8 @@ def process_single_image(i, input_file, total, args):
             args.quality,
             args.width,
             args.height,
-            args.sharpness
+            args.sharpness,
+            args.method
         )
         return (input_file, result)
     except Exception as e:
@@ -145,6 +152,8 @@ if __name__ == "__main__":
     parser.add_argument("-H", "--height", type=int, help="调整高度（保持比例）")
     parser.add_argument("-s", "--sharpness", type=float, default=1.0,
                        help="锐化强度（默认 1.0，<1.0 模糊，>1.0 锐化，建议 0.5-2.0）")
+    parser.add_argument("-m", "--method", type=int, default=6,
+                       help="WebP压缩等级 1-6 默认6 越大压缩越慢越优 原值默认4")
     parser.add_argument("--workers", "-w", type=int, default=2,
                        help="并发线程数，默认2")
     

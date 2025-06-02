@@ -1,3 +1,4 @@
+import sys
 import os
 import threading
 import logging
@@ -469,7 +470,8 @@ class MainWindow(QMainWindow):
         handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s', datefmt='%H:%M:%S'))
         self.log.handlers = [handler]
 
-        self.config_path = str(Path(__file__).parent / "config.ini")
+        # 修改配置文件路径获取方式，兼容 nuitka 单文件
+        self.config_path = str(Path(sys.argv[0]).parent / "config.ini")
         self.config = configparser.ConfigParser()
         self.load_settings()  # 启动时加载设置
         self.update_quality_label(self.format_combo.currentText())  # 初始化时同步显示

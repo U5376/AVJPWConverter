@@ -1,10 +1,7 @@
 name: C++构建
 
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -32,8 +29,12 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: List build directory for debug
+        run: dir build
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: AVJPWConverter
           path: |

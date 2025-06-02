@@ -14,7 +14,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: 设置Python环境
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v4
       with:
         python-version: 3.8
 
@@ -25,11 +25,14 @@ jobs:
         pip install pillow-avif-plugin
         pip install PyQt5
         pip install send2trash
+        pip install psutil
+        pip install configparser
+        pip install futures
         python -m pip install nuitka
 
     - name: 编译EXE文件
       run: |
-        echo Yes | nuitka --standalone --follow-imports --onefile --enable-plugin=pyqt5 --windows-console-mode=disable AVJPWConverterPyQt5.py
+        echo Yes | nuitka --standalone --follow-imports --onefile --enable-plugin=pyqt5 --windows-console-mode=disable --lto=yes AVJPWConverterPyQt5.py
 
     - name: 列出当前目录的文件列表
       shell: pwsh

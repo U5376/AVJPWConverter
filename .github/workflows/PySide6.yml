@@ -25,11 +25,14 @@ jobs:
         pip install pillow-avif-plugin
         pip install PySide6
         pip install send2trash
+        pip install psutil
+        pip install configparser
+        pip install futures
         python -m pip install nuitka
 
     - name: 编译EXE文件
       run: |
-        echo Yes | nuitka --standalone --follow-imports --onefile --enable-plugin=pyside6 --windows-console-mode=disable AVJPWConverterPySide6.py
+        echo Yes | nuitka --standalone --follow-imports --onefile --enable-plugin=pyside6 --windows-console-mode=disable --lto=yes AVJPWConverterPySide6.py
       
     - name: 列出当前目录的文件列表
       shell: pwsh
@@ -38,5 +41,5 @@ jobs:
     - name: 上传EXE文件
       uses: actions/upload-artifact@v4
       with:
-        name: AVJPWConverterPySide6-exe
-        path: ./AVJPWConverterPySide6.exe 
+        name: AVJPWConverterPySide6
+        path: ./AVJPWConverterPySide6.exe

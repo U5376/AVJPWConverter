@@ -14,7 +14,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: 设置Python环境
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v4
       with:
         python-version: 3.8
 
@@ -22,9 +22,12 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install pillow
-        pip install pillow-avif-plugin
+        pip install pillow-avif-plugin==1.4.3 #新版安装依赖错误 指定1.4.3 好像是1.5.0后没预编译wheel文件
         pip install PyQt5
         pip install send2trash
+        pip install psutil
+        pip install configparser
+        pip install futures
         python -m pip install nuitka
 
     - name: 编译EXE文件

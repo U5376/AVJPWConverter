@@ -22,9 +22,12 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install pillow
-        pip install pillow-avif-plugin
+        pip install pillow-avif-plugin==1.4.3 #新版安装依赖错误 指定1.4.3 好像是1.5.0后没预编译wheel文件
         pip install PySide6
         pip install send2trash
+        pip install psutil
+        pip install configparser
+        pip install futures
         python -m pip install nuitka
 
     - name: 编译EXE文件
@@ -38,5 +41,5 @@ jobs:
     - name: 上传EXE文件
       uses: actions/upload-artifact@v4
       with:
-        name: AVJPWConverterPySide6-exe
-        path: ./AVJPWConverterPySide6.exe 
+        name: AVJPWConverterPySide6
+        path: ./AVJPWConverterPySide6.exe

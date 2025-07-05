@@ -35,24 +35,31 @@ jobs:
 
       - name: 编译EXE文件
         run: |
-          pyoxidizer build --release \
-            --entry-point AVJPWConverterPyQt5.py
+          # 构建发布版本
+          pyoxidizer build --release
+          
+          # 准备发布目录
           $targetDir = "build/x86_64-pc-windows-msvc/release/install"
+          $distDir = "build/x86_64-pc-windows-msvc/release/dist"
           New-Item -ItemType Directory -Force -Path $targetDir
           
-          # 检查源文件是否存在
-          $sourceExe = "build/x86_64-pc-windows-msvc/release/dist/avjpwconverter_pyqt5.exe"
-          if (Test-Path $sourceExe) {
-              Copy-Item $sourceExe -Destination $targetDir -Force
+          # 复制所有必要文件
+          if (Test-Path $distDir) {
+              # 复制整个dist目录内容
+              Copy-Item "$distDir/*" -Destination $targetDir -Recurse -Force
+              
+              # 显示复制的文件列表以便调试
+              Write-Host "已复制的文件列表:"
+              Get-ChildItem $targetDir -Recurse | Select-Object FullName
           } else {
-              Write-Error "EXE file not found at: $sourceExe"
+              Write-Error "构建目录未找到: $distDir"
               Get-ChildItem "build/x86_64-pc-windows-msvc/release" -Recurse
               exit 1
           }
 
-      - name: 上传EXE文件
+      - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
           name: AVJPWConverterPyQt5-PyOxidizer
-          path: build/x86_64-pc-windows-msvc/release/install
+          path: build/x86_64-pc-windows-msvc/release/install/**/*
           if-no-files-found: error

@@ -35,10 +35,8 @@ jobs:
 
       - name: 编译EXE文件
         run: |
-          pyoxidizer build --release
-          # 等待编译完成
-          Start-Sleep -Seconds 30
-          
+          pyoxidizer build --release \
+            --entry-point AVJPWConverterPyQt5.py
           $targetDir = "build/x86_64-pc-windows-msvc/release/install"
           New-Item -ItemType Directory -Force -Path $targetDir
           

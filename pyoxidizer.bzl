@@ -14,11 +14,6 @@ def make_dist():
     policy.file_scanner_emit_files = True  # 启用文件扫描
 
     python_config = dist.make_python_interpreter_config()
-    python_config.run_command = """
-import sys
-from AVJPWConverterPyQt5 import main
-main()
-"""
     python_config.filesystem_importer = True
     python_config.oxidized_importer = True
     
@@ -33,13 +28,6 @@ main()
         "PyQt5",
         "PyQt5-sip",
     ]))
-    
-    # 使用 read_file 读取主程序文件
-    source_content = dist.read_file("AVJPWConverterPyQt5.py")
-    exe.add_python_module(
-        name="AVJPWConverterPyQt5",
-        source=source_content,
-    )
     
     return exe
 

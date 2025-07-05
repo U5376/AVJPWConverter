@@ -1,0 +1,6 @@
+PyQt5
+configparser
+pillow
+pillow-avif-plugin
+psutil
+send2trash

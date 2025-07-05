@@ -1,0 +1,45 @@
+name: PyQt5版PyOxidizer编译
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装Python环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"  # 改为3.10版本
+
+      - name: 安装Rust环境
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust缓存
+        uses: Swatinem/rust-cache@v2
+
+      - name: 安装PyOxidizer
+        run: pip install pyoxidizer
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 编译EXE文件
+        run: |
+          pyoxidizer build --release
+          $targetDir = "build/x86_64-pc-windows-msvc/release/install"
+          New-Item -ItemType Directory -Force -Path $targetDir
+          Copy-Item "build/x86_64-pc-windows-msvc/release/dist/avjpwconverter_pyqt5.exe" -Destination $targetDir -Force
+
+      - name: 上传EXE文件
+        uses: actions/upload-artifact@v4
+        with:
+          name: AVJPWConverterPyQt5-PyOxidizer
+          path: build/x86_64-pc-windows-msvc/release/install
+          if-no-files-found: error

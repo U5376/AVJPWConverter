@@ -13,9 +13,10 @@ def make_dist():
     policy.include_test = False
     policy.file_scanner_emit_files = True
     policy.include_non_distribution_sources = True  # 添加非发布源
-    policy.include_package_data = True  # 添加包数据文件
+    # 删除不支持的 include_package_data 配置
 
     python_config = dist.make_python_interpreter_config()
+    python_config.run_command = "from AVJPWConverterPyQt5 import main;main()"
     python_config.filesystem_importer = True
     python_config.oxidized_importer = True
     
@@ -25,16 +26,14 @@ def make_dist():
         config=python_config,
     )
 
-    # 添加完整的PyQt5依赖
+    # 让 PyOxidizer 自动检测和打包所有依赖
     exe.add_python_resources(exe.pip_install([
-        "PyQt5",
-        "PyQt5-sip",
-        "PyQt5-Qt5",  # 添加Qt5核心库
+        ".",  # 安装当前目录(主程序)
+        "PyQt5",  # 显式添加 PyQt5 以确保完整性
     ]))
-
-    # 添加Python运行时
-    exe.windows_runtime_dlls_mode = "always"  # 确保包含Windows运行时DLL
-    exe.windows_subsystem = "windows"  # 使用Windows子系统
+    
+    # 添加基本配置
+    exe.windows_subsystem = "windows"
     
     return exe
 
@@ -44,9 +43,18 @@ def make_embedded_resources(exe):
 def make_install(exe):
     files = FileManifest()
     files.add_python_resource(".", exe)
-    # 修改为正确的目标路径
     install_dir = "build/x86_64-pc-windows-msvc/release/install"
     files.add_location(install_dir, exe)
+    
+    # 添加Qt运行时文件
+    qt_dirs = [
+        "platforms",
+        "styles",
+        "imageformats",
+    ]
+    for qt_dir in qt_dirs:
+        files.add_source(f"lib/site-packages/PyQt5/Qt5/plugins/{qt_dir}", f"{install_dir}/{qt_dir}")
+    
     return files
 
 register_target("dist", make_dist)

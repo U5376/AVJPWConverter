@@ -495,9 +495,13 @@ class MainWindow(QMainWindow):
     def toggle_height_spin(self, state):
         # 直接使用复选框的isChecked方法
         self.height_spin.setEnabled(self.height_checkbox.isChecked())
+        if not self.height_checkbox.isChecked():
+            self.height_spin.setValue(768)
 
     def toggle_width_spin(self, state):
         self.width_spin.setEnabled(self.width_checkbox.isChecked())
+        if not self.width_checkbox.isChecked():
+            self.width_spin.setValue(1500)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():

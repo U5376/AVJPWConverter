@@ -2,6 +2,9 @@ name: PyQt5版PyOxidizer编译
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - test
 
 jobs:
   build:

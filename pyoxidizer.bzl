@@ -34,10 +34,11 @@ main()
         "PyQt5-sip",
     ]))
     
-    # 直接使用文本字符串添加主程序
+    # 使用 read_file 读取主程序文件
+    source_content = dist.read_file("AVJPWConverterPyQt5.py")
     exe.add_python_module(
         name="AVJPWConverterPyQt5",
-        source_data=Path("AVJPWConverterPyQt5.py").read_text()
+        source=source_content,
     )
     
     return exe

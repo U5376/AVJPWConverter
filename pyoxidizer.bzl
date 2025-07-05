@@ -5,13 +5,15 @@ def make_dist():
     dist = default_python_distribution()
 
     policy = dist.make_python_packaging_policy()
-    # 改为文件系统模式
+    # 包含所有必要的运行时文件
     policy.resources_location = "filesystem-relative:lib"
     policy.resources_location_fallback = "filesystem-relative:lib"
     policy.include_distribution_sources = True
     policy.include_distribution_resources = True
     policy.include_test = False
-    policy.file_scanner_emit_files = True  # 启用文件扫描
+    policy.file_scanner_emit_files = True
+    policy.include_non_distribution_sources = True  # 添加非发布源
+    policy.include_package_data = True  # 添加包数据文件
 
     python_config = dist.make_python_interpreter_config()
     python_config.filesystem_importer = True
@@ -23,11 +25,16 @@ def make_dist():
         config=python_config,
     )
 
-    # 添加PyQt5依赖
+    # 添加完整的PyQt5依赖
     exe.add_python_resources(exe.pip_install([
         "PyQt5",
         "PyQt5-sip",
+        "PyQt5-Qt5",  # 添加Qt5核心库
     ]))
+
+    # 添加Python运行时
+    exe.windows_runtime_dlls_mode = "always"  # 确保包含Windows运行时DLL
+    exe.windows_subsystem = "windows"  # 使用Windows子系统
     
     return exe
 

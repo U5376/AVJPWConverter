@@ -64,7 +64,7 @@ conversion_stopped = False  # 新增全局停止标志
 
 def process_file(file, output_dir, img_format, quality, compress, height, width,
                 delete_original, adjust_height, adjust_width, sharpness, 
-                preserve_metadata, log, collect_log=None, method=None, speed=None):
+                preserve_metadata, log, collect_log=None, method=None, speed=None, preserve_alpha=False):
     logs = []
     try:
         # 使用 pathlib 处理路径
@@ -72,11 +72,18 @@ def process_file(file, output_dir, img_format, quality, compress, height, width,
         image = Image.open(str(file_path))
         file_name = file_path.name
 
-        # 如果图像是 RGBA 模式，并且目标格式是 jpg/jpeg，则转换为 RGB 模式
-        if img_format in ["jpg", "jpeg"] and image.mode == 'RGBA':
+        # 避免P模式(调色板图像)转换异常统一转为RGBA
+        if image.mode == 'P':
+            image = image.convert('RGBA')
+
+        # 如果导出为JPG，去掉透明度转为RGB
+        if img_format.lower() in ("jpg", "jpeg") and image.mode != 'RGB':
             image = image.convert('RGB')
-            msg = f"图像 {file_name} 的 Alpha 通道已被移除，转换为 RGB 模式"
-            logs.append(msg)
+
+        # 新增：选框决定是否保留透明通道
+        if not preserve_alpha and img_format.lower() in ("png", "webp", "avif"):
+            if image.mode in ('RGBA', 'LA'):
+                image = image.convert('RGB')
 
         # 如果需要调整高度或宽度，则调整图像大小，保持纵横比，不放大较小的图片
         if (adjust_height and image.height > height) or (adjust_width and image.width > width):
@@ -154,7 +161,7 @@ def process_file(file, output_dir, img_format, quality, compress, height, width,
 def run_conversion(input_files, output_dir, img_format, quality, compress, height, width,
                    delete_original, adjust_height, adjust_width, sharpness, pause_event,
                    stop_event, log, progress_label, preserve_metadata, on_finished,
-                   thread_count=None, method=None, speed=None):
+                   thread_count=None, method=None, speed=None, preserve_alpha=False):
     global conversion_stopped
     conversion_stopped = False
 
@@ -175,8 +182,8 @@ def run_conversion(input_files, output_dir, img_format, quality, compress, heigh
         for input_path in input_files:
             p = Path(input_path)
             if p.is_dir():
-                files += [str(f) for f in p.rglob('*') if f.suffix.lower() in ['.png', '.jpg', '.jpeg', '.webp', '.avif']]
-            elif p.is_file() and p.suffix.lower() in ['.png', '.jpg', '.jpeg', '.webp', '.avif']:
+                files += [str(f) for f in p.rglob('*') if f.suffix.lower() in ['.png', '.jpg', '.jpeg', '.webp', '.avif', '.gif']]
+            elif p.is_file() and p.suffix.lower() in ['.png', '.jpg', '.jpeg', '.webp', '.avif', '.gif']:
                 files.append(str(p))
 
         if output_dir:
@@ -220,7 +227,7 @@ def run_conversion(input_files, output_dir, img_format, quality, compress, heigh
                 try:
                     ok, logs = process_file(file, output_dir, img_format, quality, compress, height, width,
                         delete_original, adjust_height, adjust_width, sharpness, preserve_metadata, log,
-                        method=method, speed=speed)
+                        method=method, speed=speed, preserve_alpha=preserve_alpha)
                     return ok, idx, file, logs
                 except Exception as e:
                     logs = [f"转换 {file} 失败。错误原因: {e}"]
@@ -368,6 +375,10 @@ class MainWindow(QMainWindow):
         self.delete_original_checkbox.setChecked(False)
         self.preserve_metadata_checkbox = QCheckBox("保留修改时间")
         self.preserve_metadata_checkbox.setChecked(True)
+        # 新增：保留透明通道复选框
+        self.preserve_alpha_checkbox = QCheckBox("保留透明通道")
+        self.preserve_alpha_checkbox.setChecked(False)  # 默认不勾选
+        self.preserve_alpha_checkbox.setToolTip("仅部分格式支持透明通道，未勾选则自动去除透明")
         combined_layout = QHBoxLayout()
         combined_layout.addWidget(self.delete_original_checkbox)
         combined_layout.addSpacing(8)
@@ -379,6 +390,8 @@ class MainWindow(QMainWindow):
         combined_layout.addWidget(self.speed_label)
         combined_layout.addWidget(self.speed_combo)
         format_layout.addLayout(combined_layout, 0, 1, 1, 3, Qt.AlignLeft)
+        # 新增：保留透明通道复选框放到第3行第1列
+        format_layout.addWidget(self.preserve_alpha_checkbox, 2, 0, 1, 1, Qt.AlignLeft)
         format_group.setLayout(format_layout)
         # 保存 combined_layout 到 self 以便后续访问
         self.combined_layout = combined_layout
@@ -608,6 +621,7 @@ class MainWindow(QMainWindow):
             # method/speed 参数
             method = int(self.method_combo.currentText()) if img_format == 'webp' else None
             speed = int(self.speed_combo.currentText()) if img_format == 'avif' else None
+            preserve_alpha = self.preserve_alpha_checkbox.isChecked()
 
             if (img_format == 'png'):
                 compress = min(compress, 9)  # 限制压缩级别最大为9
@@ -616,13 +630,6 @@ class MainWindow(QMainWindow):
 
             conversion_paused.set()  # 确保每次开始转换时为“运行”状态
             # 清理之前的线程
-
-            if img_format == 'png':
-                compress = min(compress, 9)
-            elif img_format == 'avif':
-                compress = min(compress, 63)
-
-            conversion_paused.set()
             if hasattr(self, 'convert_thread'):
                 try:
                     if self.convert_thread.is_alive():
@@ -644,7 +651,8 @@ class MainWindow(QMainWindow):
                       ],
                       thread_count,
                       method,  # 新增参数
-                      speed    # 新增参数
+                      speed,   # 新增参数
+                      preserve_alpha
                 )
             )
             self.convert_thread.start()
@@ -754,7 +762,8 @@ class MainWindow(QMainWindow):
             'preserve_metadata': str(self.preserve_metadata_checkbox.isChecked()),
             'cpu_threads': self.cpu_combo.currentText(),
             'method': self.method_combo.currentText(),
-            'speed': self.speed_combo.currentText()
+            'speed': self.speed_combo.currentText(),
+            'preserve_alpha': str(self.preserve_alpha_checkbox.isChecked())
         }
         with open(self.config_path, 'w', encoding='utf-8') as configfile:
             self.config.write(configfile)
@@ -785,6 +794,7 @@ class MainWindow(QMainWindow):
             self.cpu_combo.setCurrentIndex(cpu_idx)
         self.method_combo.setCurrentText(s.get('method', '6'))
         self.speed_combo.setCurrentText(s.get('speed', '4'))
+        self.preserve_alpha_checkbox.setChecked(s.get('preserve_alpha', 'False') == 'True')
         self.log.info("设置已从 settings.ini 加载")
 
     def reset_settings(self):
@@ -803,6 +813,7 @@ class MainWindow(QMainWindow):
         self.cpu_combo.setCurrentText(str(multiprocessing.cpu_count()))
         self.method_combo.setCurrentText("6")
         self.speed_combo.setCurrentText("4")
+        self.preserve_alpha_checkbox.setChecked(False)
         self.log.info("设置已重置为默认值")
 
 if __name__ == "__main__":

@@ -72,6 +72,10 @@ def process_file(file, output_dir, img_format, quality, compress, height, width,
         image = Image.open(str(file_path))
         file_name = file_path.name
 
+        # 如果是1 BPP黑白图，先转为灰度，避免细节损失
+        if image.mode == '1':
+            image = image.convert('L')
+
         # 避免P模式(调色板图像)转换异常统一转为RGBA
         if image.mode == 'P':
             image = image.convert('RGBA')
@@ -93,16 +97,16 @@ def process_file(file, output_dir, img_format, quality, compress, height, width,
                 # 取高宽最低的那个数值为主
                 if height < width / aspect_ratio:
                     new_height = height
-                    new_width = int(height * aspect_ratio)
+                    new_width = round(height * aspect_ratio)
                 else:
                     new_width = width
-                    new_height = int(width / aspect_ratio)
+                    new_height = round(width / aspect_ratio)
             elif adjust_height:
                 new_height = height
-                new_width = int(height * aspect_ratio)
+                new_width = round(height * aspect_ratio)
             elif adjust_width:
                 new_width = width
-                new_height = int(width / aspect_ratio)
+                new_height = round(width / aspect_ratio)
 
             image = image.resize((new_width, new_height), Image.LANCZOS)
 

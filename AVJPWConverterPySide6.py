@@ -63,7 +63,7 @@ conversion_stopped = False  # 新增全局停止标志
 
 def process_file(file, output_dir, img_format, quality, compress, height, width,
                 delete_original, adjust_height, adjust_width, sharpness, 
-                preserve_metadata, log, method=None, speed=None, preserve_alpha=False):
+                preserve_metadata, log, method=None, speed=None, preserve_alpha=False, lossless=False):
     logs = []
     try:
         # 使用 pathlib 处理路径
@@ -129,11 +129,17 @@ def process_file(file, output_dir, img_format, quality, compress, height, width,
         # 变换图像并保存
         if img_format in ["jpg", "jpeg", "webp", "avif"]:
             if img_format == "webp":
-                # 自定义method为6 最优最慢1-6 原值默认4
-                image.save(str(new_file_path), quality=quality, method=method if method is not None else 6)
+                # 支持无损webp
+                if lossless:
+                    image.save(str(new_file_path), lossless=True, method=method if method is not None else 6)
+                else:
+                    image.save(str(new_file_path), quality=quality, method=method if method is not None else 6)
             elif img_format == "avif":
-                # 自定义speed为4 最优最慢0-10 原值默认6
-                image.save(str(new_file_path), quality=quality, speed=speed if speed is not None else 4)
+                # 支持AVIF无损
+                if lossless:
+                    image.save(str(new_file_path), lossless=True, speed=speed if speed is not None else 4)
+                else:
+                    image.save(str(new_file_path), quality=quality, speed=speed if speed is not None else 4)
             else:
                 image.save(str(new_file_path), quality=quality)
         elif img_format == "png":
@@ -159,7 +165,7 @@ def process_file(file, output_dir, img_format, quality, compress, height, width,
 def run_conversion(input_files, output_dir, img_format, quality, compress, height, width,
                    delete_original, adjust_height, adjust_width, sharpness, pause_event,
                    stop_event, log, progress_label, preserve_metadata, on_finished,
-                   thread_count=None, method=None, speed=None, preserve_alpha=False):
+                   thread_count=None, method=None, speed=None, preserve_alpha=False, lossless=False):
     global conversion_stopped
     conversion_stopped = False
 
@@ -225,7 +231,7 @@ def run_conversion(input_files, output_dir, img_format, quality, compress, heigh
                 try:
                     ok, logs = process_file(file, output_dir, img_format, quality, compress, height, width,
                         delete_original, adjust_height, adjust_width, sharpness, preserve_metadata, log,
-                        method=method, speed=speed, preserve_alpha=preserve_alpha)
+                        method=method, speed=speed, preserve_alpha=preserve_alpha, lossless=lossless)
                     return ok, idx, file, logs
                 except Exception as e:
                     logs = [f"转换 {file} 失败。错误原因: {e}"]
@@ -381,6 +387,11 @@ class MainWindow(QMainWindow):
         self.preserve_alpha_checkbox = QCheckBox("保留透明通道")
         self.preserve_alpha_checkbox.setChecked(False)  # 默认不勾选
         self.preserve_alpha_checkbox.setToolTip("仅部分格式支持透明通道，未勾选则自动去除透明")
+        # 新增：无损转换复选框
+        self.lossless_checkbox = QCheckBox("无损转换")
+        self.lossless_checkbox.setChecked(False)
+        self.lossless_checkbox.setToolTip("仅支持无损转换的格式可用")
+
         combined_layout = QHBoxLayout()
         combined_layout.addWidget(self.delete_original_checkbox)
         combined_layout.addSpacing(8)
@@ -392,8 +403,9 @@ class MainWindow(QMainWindow):
         combined_layout.addWidget(self.speed_label)
         combined_layout.addWidget(self.speed_combo)
         format_layout.addLayout(combined_layout, 0, 1, 1, 3, Qt.AlignLeft)
-        # 新增：保留透明通道复选框放到第3行第1列
+        # 新增：保留透明通道复选框放到第3行第1列，无损转换复选框放到第3行第2列
         format_layout.addWidget(self.preserve_alpha_checkbox, 2, 0, 1, 1, Qt.AlignLeft)
+        format_layout.addWidget(self.lossless_checkbox, 2, 1, 1, 1, Qt.AlignLeft)
         format_group.setLayout(format_layout)
         # 保存 combined_layout 到 self 以便后续访问
         self.combined_layout = combined_layout
@@ -490,6 +502,19 @@ class MainWindow(QMainWindow):
         self.config = configparser.ConfigParser()
         self.load_settings()  # 启动时加载设置
         self.update_quality_label(self.format_combo.currentText())  # 初始化时同步显示
+        self.update_lossless_checkbox(self.format_combo.currentText())  # 初始化时同步无损复选框状态
+
+    def update_lossless_checkbox(self, fmt):
+        """根据格式设置无损转换复选框可用性"""
+        fmt = fmt.lower()
+        # 仅WebP、AVIF支持无损（PNG本身是无损的，JPG不支持）
+        if fmt in ("webp", "avif"):
+            self.lossless_checkbox.setVisible(True)
+            self.lossless_checkbox.setEnabled(True)
+            self.lossless_checkbox.setToolTip("支持无损转换")
+        else:
+            self.lossless_checkbox.setVisible(False)
+            self.lossless_checkbox.setChecked(False)
 
     def toggle_method_speed(self, text):
         """根据格式显示/隐藏 method/speed 下拉框"""
@@ -591,6 +616,7 @@ class MainWindow(QMainWindow):
             self.quality_spin.setValue(63)
             self.quality_spin.setToolTip("AVIF 质量 (1-63，默认值为 63)")
         self.toggle_method_speed(text)
+        self.update_lossless_checkbox(text)
 
     def convert_images(self):
         if self.input_line.text() == '':
@@ -620,6 +646,7 @@ class MainWindow(QMainWindow):
             method = int(self.method_combo.currentText()) if img_format == 'webp' else None
             speed = int(self.speed_combo.currentText()) if img_format == 'avif' else None
             preserve_alpha = self.preserve_alpha_checkbox.isChecked()
+            lossless = self.lossless_checkbox.isChecked()
 
             if (img_format == 'png'):
                 compress = min(compress, 9)  # 限制压缩级别最大为9
@@ -650,7 +677,8 @@ class MainWindow(QMainWindow):
                       thread_count,
                       method,  # 新增参数
                       speed,   # 新增参数
-                      preserve_alpha
+                      preserve_alpha,
+                      lossless
                 )
             )
             self.convert_thread.start()
@@ -755,7 +783,8 @@ class MainWindow(QMainWindow):
             'cpu_threads': self.cpu_combo.currentText(),
             'method': self.method_combo.currentText(),
             'speed': self.speed_combo.currentText(),
-            'preserve_alpha': str(self.preserve_alpha_checkbox.isChecked())
+            'preserve_alpha': str(self.preserve_alpha_checkbox.isChecked()),
+            'lossless': str(self.lossless_checkbox.isChecked())
         }
         with open(self.config_path, 'w', encoding='utf-8') as configfile:
             self.config.write(configfile)
@@ -787,6 +816,7 @@ class MainWindow(QMainWindow):
         self.method_combo.setCurrentText(s.get('method', '6'))
         self.speed_combo.setCurrentText(s.get('speed', '4'))
         self.preserve_alpha_checkbox.setChecked(s.get('preserve_alpha', 'False') == 'True')
+        self.lossless_checkbox.setChecked(s.get('lossless', 'False') == 'True')
         self.log.info("设置已从 settings.ini 加载")
 
     def reset_settings(self):
@@ -806,6 +836,7 @@ class MainWindow(QMainWindow):
         self.method_combo.setCurrentText("6")
         self.speed_combo.setCurrentText("4")
         self.preserve_alpha_checkbox.setChecked(False)
+        self.lossless_checkbox.setChecked(False)
         self.log.info("设置已重置为默认值")
 
 if __name__ == "__main__":

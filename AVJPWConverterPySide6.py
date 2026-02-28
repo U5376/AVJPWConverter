@@ -500,8 +500,8 @@ class MainWindow(QMainWindow):
         # 修改配置文件路径获取方式，兼容 nuitka 单文件
         self.config_path = str(Path(sys.argv[0]).parent / "config.ini")
         self.config = configparser.ConfigParser()
-        self.load_settings()  # 启动时加载设置
         self.update_quality_label(self.format_combo.currentText())  # 初始化时同步显示
+        self.load_settings()  # 启动时加载设置
         self.update_lossless_checkbox(self.format_combo.currentText())  # 初始化时同步无损复选框状态
 
     def update_lossless_checkbox(self, fmt):

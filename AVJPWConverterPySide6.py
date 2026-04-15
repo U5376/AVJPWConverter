@@ -878,7 +878,8 @@ class MainWindow(QMainWindow):
         file_list_dialog.exec_()
 
     def save_settings(self):
-        """保存当前设置到ini文件"""
+        """保存当前设置到ini文件，并保存窗口坐标"""
+        # 保存主设置
         self.config['Main'] = {
             'format': self.format_combo.currentText(),
             'quality': str(self.quality_spin.value()),
@@ -893,39 +894,65 @@ class MainWindow(QMainWindow):
             'method': self.method_combo.currentText(),
             'speed': self.speed_combo.currentText(),
             'preserve_alpha': str(self.preserve_alpha_checkbox.isChecked()),
-            'lossless': str(self.lossless_checkbox.isChecked())
+            'lossless': str(self.lossless_checkbox.isChecked()),
+            # 新增色彩子采样和重采样
+            'subsample_checked': str(self.subsample_checkbox.isChecked()),
+            'subsample_index': str(self.subsample_combo.currentIndex()),
+            'resample_checked': str(self.resample_checkbox.isChecked()),
+            'resample_index': str(self.resample_combo.currentIndex()),
+        }
+        # 保存窗口坐标
+        x = self.x()
+        y = self.y()
+        self.config['Window'] = {
+            'x': str(x),
+            'y': str(y)
         }
         with open(self.config_path, 'w', encoding='utf-8') as configfile:
             self.config.write(configfile)
-        self.log.info("设置已保存到 settings.ini")
+        self.log.info(f"设置已保存到 settings.ini，窗口坐标: ({x}, {y})")
 
     def load_settings(self):
-        """加载ini文件设置"""
+        """加载ini文件设置，并恢复窗口坐标"""
         if not os.path.exists(self.config_path):
             return
         self.config.read(self.config_path, encoding='utf-8')
-        if 'Main' not in self.config:
-            return
-        s = self.config['Main']
-        fmt = s.get('format', 'avif')
-        idx = self.format_combo.findText(fmt)
-        if idx >= 0:
-            self.format_combo.setCurrentIndex(idx)
-        self.quality_spin.setValue(int(s.get('quality', self.quality_spin.value())))
-        self.height_spin.setValue(int(s.get('height', self.height_spin.value())))
-        self.width_spin.setValue(int(s.get('width', self.width_spin.value())))
-        self.height_checkbox.setChecked(s.get('height_checked', 'True') == 'True')
-        self.width_checkbox.setChecked(s.get('width_checked', 'False') == 'True')
-        self.sharpness_spin.setValue(float(s.get('sharpness', self.sharpness_spin.value())))
-        self.delete_original_checkbox.setChecked(s.get('delete_original', 'False') == 'True')
-        self.preserve_metadata_checkbox.setChecked(s.get('preserve_metadata', 'True') == 'True')
-        cpu_idx = self.cpu_combo.findText(s.get('cpu_threads', self.cpu_combo.currentText()))
-        if cpu_idx >= 0:
-            self.cpu_combo.setCurrentIndex(cpu_idx)
-        self.method_combo.setCurrentText(s.get('method', '6'))
-        self.speed_combo.setCurrentText(s.get('speed', '4'))
-        self.preserve_alpha_checkbox.setChecked(s.get('preserve_alpha', 'False') == 'True')
-        self.lossless_checkbox.setChecked(s.get('lossless', 'False') == 'True')
+        if 'Main' in self.config:
+            s = self.config['Main']
+            fmt = s.get('format', 'avif')
+            idx = self.format_combo.findText(fmt)
+            if idx >= 0:
+                self.format_combo.setCurrentIndex(idx)
+            self.quality_spin.setValue(int(s.get('quality', self.quality_spin.value())))
+            self.height_spin.setValue(int(s.get('height', self.height_spin.value())))
+            self.width_spin.setValue(int(s.get('width', self.width_spin.value())))
+            self.height_checkbox.setChecked(s.get('height_checked', 'True') == 'True')
+            self.width_checkbox.setChecked(s.get('width_checked', 'False') == 'True')
+            self.sharpness_spin.setValue(float(s.get('sharpness', self.sharpness_spin.value())))
+            self.delete_original_checkbox.setChecked(s.get('delete_original', 'False') == 'True')
+            self.preserve_metadata_checkbox.setChecked(s.get('preserve_metadata', 'True') == 'True')
+            cpu_idx = self.cpu_combo.findText(s.get('cpu_threads', self.cpu_combo.currentText()))
+            if cpu_idx >= 0:
+                self.cpu_combo.setCurrentIndex(cpu_idx)
+            self.method_combo.setCurrentText(s.get('method', '6'))
+            self.speed_combo.setCurrentText(s.get('speed', '4'))
+            self.preserve_alpha_checkbox.setChecked(s.get('preserve_alpha', 'False') == 'True')
+            self.lossless_checkbox.setChecked(s.get('lossless', 'False') == 'True')
+            # 新增色彩子采样和重采样
+            self.subsample_checkbox.setChecked(s.get('subsample_checked', 'False') == 'True')
+            self.subsample_combo.setCurrentIndex(int(s.get('subsample_index', '0')))
+            self.resample_checkbox.setChecked(s.get('resample_checked', 'False') == 'True')
+            self.resample_combo.setCurrentIndex(int(s.get('resample_index', '0')))
+        # 恢复窗口坐标
+        if 'Window' in self.config:
+            w = self.config['Window']
+            try:
+                x = int(w.get('x', '100'))
+                y = int(w.get('y', '100'))
+                self.move(x, y)
+                self.log.info(f"窗口坐标已恢复到: ({x}, {y})")
+            except Exception as e:
+                self.log.warning(f"窗口坐标恢复失败: {e}")
         self.log.info("设置已从 settings.ini 加载")
 
     def reset_settings(self):

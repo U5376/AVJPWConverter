@@ -28,7 +28,7 @@ jobs:
         pip install psutil
         pip install configparser
         pip install futures
-        python -m pip install nuitka
+        pip install nuitka zstandard  # nuitka 4.0必须安装 zstandard 才能启用压缩
 
     - name: 编译EXE文件
       run: |

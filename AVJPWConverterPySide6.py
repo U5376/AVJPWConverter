@@ -63,7 +63,7 @@ conversion_stopped = False  # 新增全局停止标志
 
 def process_file(file, output_dir, img_format, quality, compress, height, width,
                 delete_original, adjust_height, adjust_width, sharpness, 
-                preserve_metadata, log, method=None, speed=None, preserve_alpha=False, lossless=False):
+                preserve_metadata, log, method=None, speed=None, preserve_alpha=False, lossless=False, subsample=None, resample=None):
     logs = []
     try:
         # 使用 pathlib 处理路径
@@ -105,7 +105,15 @@ def process_file(file, output_dir, img_format, quality, compress, height, width,
             elif adjust_width:
                 new_width = width
                 new_height = round(width / aspect_ratio)
-            image = image.resize((new_width, new_height), Image.LANCZOS)
+            # 选择重采样算法
+            resample_map = {
+                "LANCZOS": Image.LANCZOS,
+                "BICUBIC": Image.BICUBIC,
+                "BILINEAR": Image.BILINEAR,
+                "NEAREST": Image.NEAREST,
+            }
+            resample_method = resample_map.get(resample, Image.LANCZOS)
+            image = image.resize((new_width, new_height), resample_method)
 
         # 添加锐化处理：当锐化因子不为默认值 1.0 时，进行图像锐化
         if sharpness != 1.0:
@@ -127,6 +135,10 @@ def process_file(file, output_dir, img_format, quality, compress, height, width,
         new_file_path.parent.mkdir(parents=True, exist_ok=True)
 
         # 变换图像并保存
+        save_kwargs = {}
+        # 色彩子采样参数
+        if subsample and img_format in ["jpg", "jpeg", "avif"]:
+            save_kwargs["subsampling"] = subsample
         if img_format in ["jpg", "jpeg", "webp", "avif"]:
             if img_format == "webp":
                 # 支持无损webp
@@ -137,11 +149,11 @@ def process_file(file, output_dir, img_format, quality, compress, height, width,
             elif img_format == "avif":
                 # 支持AVIF无损
                 if lossless:
-                    image.save(str(new_file_path), lossless=True, speed=speed if speed is not None else 4)
+                    image.save(str(new_file_path), lossless=True, speed=speed if speed is not None else 4, **save_kwargs)
                 else:
-                    image.save(str(new_file_path), quality=quality, speed=speed if speed is not None else 4)
+                    image.save(str(new_file_path), quality=quality, speed=speed if speed is not None else 4, **save_kwargs)
             else:
-                image.save(str(new_file_path), quality=quality)
+                image.save(str(new_file_path), quality=quality, **save_kwargs)
         elif img_format == "png":
             image.save(str(new_file_path), compress_level=compress)
 
@@ -165,7 +177,7 @@ def process_file(file, output_dir, img_format, quality, compress, height, width,
 def run_conversion(input_files, output_dir, img_format, quality, compress, height, width,
                    delete_original, adjust_height, adjust_width, sharpness, pause_event,
                    stop_event, log, progress_label, preserve_metadata, on_finished,
-                   thread_count=None, method=None, speed=None, preserve_alpha=False, lossless=False):
+                   thread_count=None, method=None, speed=None, preserve_alpha=False, lossless=False, subsample=None, resample=None):
     global conversion_stopped
     conversion_stopped = False
 
@@ -229,9 +241,12 @@ def run_conversion(input_files, output_dir, img_format, quality, compress, heigh
                 if stop_event.is_set():
                     return 'stopped', idx, file, []
                 try:
-                    ok, logs = process_file(file, output_dir, img_format, quality, compress, height, width,
+                    ok, logs = process_file(
+                        file, output_dir, img_format, quality, compress, height, width,
                         delete_original, adjust_height, adjust_width, sharpness, preserve_metadata, log,
-                        method=method, speed=speed, preserve_alpha=preserve_alpha, lossless=lossless)
+                        method=method, speed=speed, preserve_alpha=preserve_alpha, lossless=lossless,
+                        subsample=subsample, resample=resample
+                    )
                     return ok, idx, file, logs
                 except Exception as e:
                     logs = [f"转换 {file} 失败。错误原因: {e}"]
@@ -270,6 +285,14 @@ class MainWindow(QMainWindow):
         # 设置全局字体
         font = QFont("宋体", 9)
         QApplication.instance().setFont(font)
+        # 记录各格式上次的质量值
+        self.quality_values = {
+            'jpg': 90,
+            'png': 6,
+            'webp': 80,
+            'avif': 63,
+        }
+        # 注意：self.format_combo 必须在其创建后再初始化 _last_quality_fmt
 
         self.convert_thread = None  # 添加线程引用
 
@@ -392,6 +415,42 @@ class MainWindow(QMainWindow):
         self.lossless_checkbox.setChecked(False)
         self.lossless_checkbox.setToolTip("仅支持无损转换的格式可用")
 
+        # 新增：色彩子采样复选框
+        self.subsample_checkbox = QCheckBox("色彩子采样")
+        self.subsample_checkbox.setChecked(False)
+        self.subsample_checkbox.setToolTip("仅avif和jpg格式支持色彩子采样，默认4:2:0")
+        self.subsample_combo = QComboBox()
+        self.subsample_combo.addItems([
+            "4:2:0",
+            "4:4:4",
+            "4:2:2",
+        ])
+        self.subsample_combo.setCurrentIndex(0)
+        self.subsample_combo.setFixedWidth(55)
+        self.subsample_combo.setEnabled(False)
+        self.subsample_checkbox.stateChanged.connect(lambda s: self.subsample_combo.setEnabled(self.subsample_checkbox.isChecked()))
+
+        # 新增：重采样算法复选框和下拉框
+        self.resample_checkbox = QCheckBox("重采样")
+        self.resample_checkbox.setChecked(False)
+        self.resample_checkbox.setToolTip("默认LANCZOS")
+        self.resample_combo = QComboBox()
+        self.resample_combo.addItems([
+            "LANCZOS",
+            "BICUBIC",
+            "BILINEAR",
+            "NEAREST",
+        ])
+        self.resample_combo.setToolTip("选择重采样算法")
+        self.resample_combo.setItemData(0, "高质量，速度最慢", Qt.ToolTipRole)
+        self.resample_combo.setItemData(1, "双三次插值，质量较高", Qt.ToolTipRole)
+        self.resample_combo.setItemData(2, "双线性插值，速度快", Qt.ToolTipRole)
+        self.resample_combo.setItemData(3, "最近邻插值，速度最快", Qt.ToolTipRole)
+        self.resample_combo.setCurrentIndex(0)
+        self.resample_combo.setFixedWidth(70)
+        self.resample_combo.setEnabled(False)
+        self.resample_checkbox.stateChanged.connect(lambda s: self.resample_combo.setEnabled(self.resample_checkbox.isChecked()))
+
         combined_layout = QHBoxLayout()
         combined_layout.addWidget(self.delete_original_checkbox)
         combined_layout.addSpacing(8)
@@ -402,10 +461,19 @@ class MainWindow(QMainWindow):
         combined_layout.addWidget(self.method_combo)
         combined_layout.addWidget(self.speed_label)
         combined_layout.addWidget(self.speed_combo)
-        format_layout.addLayout(combined_layout, 0, 1, 1, 3, Qt.AlignLeft)
-        # 新增：保留透明通道复选框放到第3行第1列，无损转换复选框放到第3行第2列
-        format_layout.addWidget(self.preserve_alpha_checkbox, 2, 0, 1, 1, Qt.AlignLeft)
-        format_layout.addWidget(self.lossless_checkbox, 2, 1, 1, 1, Qt.AlignLeft)
+        format_layout.addLayout(combined_layout, 0, 1, 1, 3, Qt.AlignLeft) # method/speed放在第一行右侧
+
+        # 第3行所有复选框和下拉框放到一个横向布局
+        row3_layout = QHBoxLayout()
+        row3_layout.addWidget(self.preserve_alpha_checkbox) # 保留透明通道复选框
+        row3_layout.addWidget(self.lossless_checkbox) # 无损转换复选框
+        row3_layout.addWidget(self.subsample_checkbox) # 色彩子采样复选框
+        row3_layout.addWidget(self.subsample_combo) # 色彩子采样下拉框
+        row3_layout.addWidget(self.resample_checkbox) # 重采样复选框
+        row3_layout.addWidget(self.resample_combo) # 重采样下拉框
+        row3_layout.addStretch()  # 左侧靠齐
+
+        format_layout.addLayout(row3_layout, 2, 0, 1, 6, Qt.AlignLeft)
         format_group.setLayout(format_layout)
         # 保存 combined_layout 到 self 以便后续访问
         self.combined_layout = combined_layout
@@ -500,6 +568,7 @@ class MainWindow(QMainWindow):
         # 修改配置文件路径获取方式，兼容 nuitka 单文件
         self.config_path = str(Path(sys.argv[0]).parent / "config.ini")
         self.config = configparser.ConfigParser()
+        self._last_quality_fmt = self.format_combo.currentText()
         self.update_quality_label(self.format_combo.currentText())  # 初始化时同步显示
         self.load_settings()  # 启动时加载设置
         self.update_lossless_checkbox(self.format_combo.currentText())  # 初始化时同步无损复选框状态
@@ -595,26 +664,45 @@ class MainWindow(QMainWindow):
             print("未选择有效的输出路径或路径不存在")
 
     def update_quality_label(self, text):
+        # 保存当前格式的质量值
+        prev_fmt = getattr(self, "_last_quality_fmt", None)
+        if prev_fmt:
+            self.quality_values[prev_fmt] = self.quality_spin.value()
+        self._last_quality_fmt = text
+
+        # 控制色彩子采样显示
+        if text in ('avif', 'jpg'):
+            self.subsample_checkbox.setVisible(True)
+            self.subsample_combo.setVisible(True)
+        else:
+            self.subsample_checkbox.setVisible(False)
+            self.subsample_combo.setVisible(False)
+        # 控制透明通道复选框
+        if text in ('png', 'webp', 'avif'):
+            self.preserve_alpha_checkbox.setVisible(True)
+        else:
+            self.preserve_alpha_checkbox.setVisible(False)
+            self.preserve_alpha_checkbox.setChecked(False)
+
+        # 设置质量标签和范围
         if text == 'jpg':
             self.quality_label.setText('JPEG质量')
             self.quality_spin.setRange(1, 100)
-            self.quality_spin.setValue(90)
             self.quality_spin.setToolTip("JPEG 质量范围：1-100，默认90")
         elif text == 'png':
             self.quality_label.setText('PNG压缩')
             self.quality_spin.setRange(0, 9)
-            self.quality_spin.setValue(6)
             self.quality_spin.setToolTip("PNG 压缩级别 (0-9，默认值为 6")
         elif text == 'webp':
             self.quality_label.setText('WebP质量')
             self.quality_spin.setRange(0, 100)
-            self.quality_spin.setValue(80)
             self.quality_spin.setToolTip("WebP 质量 (0-100，默认值为 80)")
         elif text == 'avif':
             self.quality_label.setText('AVIF质量')
             self.quality_spin.setRange(1, 63)
-            self.quality_spin.setValue(63)
             self.quality_spin.setToolTip("AVIF 质量 (1-63，默认值为 63)")
+        # 恢复上次的值
+        self.quality_spin.setValue(self.quality_values.get(text, self.quality_spin.minimum()))
         self.toggle_method_speed(text)
         self.update_lossless_checkbox(text)
 
@@ -647,6 +735,25 @@ class MainWindow(QMainWindow):
             speed = int(self.speed_combo.currentText()) if img_format == 'avif' else None
             preserve_alpha = self.preserve_alpha_checkbox.isChecked()
             lossless = self.lossless_checkbox.isChecked()
+            # 色彩子采样参数
+            subsample = None
+            if self.subsample_checkbox.isChecked():
+                subsample_map = {
+                    0: "4:2:0",
+                    1: "4:4:4",
+                    2: "4:2:2",
+                }
+                subsample = subsample_map.get(self.subsample_combo.currentIndex(), "4:2:0")
+            # 重采样算法参数
+            resample = None
+            if self.resample_checkbox.isChecked():
+                resample_map = {
+                    0: "LANCZOS",
+                    1: "BICUBIC",
+                    2: "BILINEAR",
+                    3: "NEAREST",
+                }
+                resample = resample_map.get(self.resample_combo.currentIndex(), "LANCZOS")
 
             if (img_format == 'png'):
                 compress = min(compress, 9)  # 限制压缩级别最大为9
@@ -675,10 +782,12 @@ class MainWindow(QMainWindow):
                           delattr(self, 'convert_thread')  # 转换完成后清理线程引用
                       ],
                       thread_count,
-                      method,  # 新增参数
-                      speed,   # 新增参数
-                      preserve_alpha,
-                      lossless
+                      method,  # 控制webp压缩速度/质量平衡
+                      speed,   # 控制avif压缩速度/质量平衡
+                      preserve_alpha, #透明通道
+                      lossless,  # 无损参数
+                      subsample, # 色彩子采样
+                      resample   # 重采样算法
                 )
             )
             self.convert_thread.start()

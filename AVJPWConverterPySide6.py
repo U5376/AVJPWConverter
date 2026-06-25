@@ -770,6 +770,7 @@ class MainWindow(QMainWindow):
                         self.convert_thread.join(timeout=0.5)
                 except:
                     pass
+            self.stop_event.clear()  # 在启动新任务前，彻底清除之前的停止状态
             # 创建并启动新线程
             self.convert_thread = threading.Thread(
                 target=run_conversion,
@@ -807,7 +808,7 @@ class MainWindow(QMainWindow):
             if conversion_paused.is_set():
                 conversion_paused.clear()
                 self.pause_button.setText('继续')
-                self.log_emitter.log_message.emit("转换已暂停(点击继续按钮恢复)")
+                self.log_emitter.log_message.emit("转换暂停中(等待线程完成当前任务)")
             else:
                 conversion_paused.set()
                 self.pause_button.setText('暂停')
@@ -828,16 +829,14 @@ class MainWindow(QMainWindow):
             conversion_stopped = True
             self.stop_event.set()
             conversion_paused.set()  # 确保线程能检测停止
+            self.pause_button.setText('暂停')  # 恢复暂停按钮的状态
             
             # 仅清空输入路径
             self.clear_input_signal.emit()
-            self.progress_label.setText("转换已停止")
+            self.progress_label.setText("转换停止中(等待线程完成)")
             self.log.info("转换已停止(输出路径保留)")
             
-            # 重置停止状态
-            time.sleep(0.1)  # 确保线程响应
-            self.stop_event.clear()
-            conversion_stopped = False
+            # 删除了 time.sleep(0.1) 和 self.stop_event.clear() 保持 stop_event 处于 set 状态，确保线程池中所有正在排队的任务都能读到终止信号
         except Exception as e:
             self.log.error(f"停止出错: {str(e)}")
 

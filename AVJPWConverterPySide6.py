@@ -3,9 +3,11 @@ import os
 import threading
 import logging
 import time
-import pillow_avif
+import re
+import html
+import pillow_avif  # 副作用注册AVIF编解码器
 import warnings
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageFile
 from send2trash import send2trash
 from PySide6.QtCore import Qt, Signal, QUrl, QObject
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QDesktopServices, QFont
@@ -61,6 +63,29 @@ conversion_paused = threading.Event()
 conversion_paused.set()  # 初始为“运行”状态
 conversion_stopped = False  # 新增全局停止标志
 
+def safe_open_image(file_path, logs):
+    """打开图片；若文件被截断(数据不完整)则容错加载并给出警告"""
+    try:
+        image = Image.open(str(file_path))
+        image.load()  # 强制立即解码，让截断错误在此处暴露
+        return image
+    except Exception as e:
+        err_msg = str(e)
+        if "truncated" in err_msg.lower():
+            # 从报错中提取缺少的字节数，如 "image file is truncated (26 bytes not processed)"
+            m = re.search(r'(\d+)\s*bytes', err_msg)
+            missing = f"{m.group(1)}字节" if m else "未知数量"
+            prev = ImageFile.LOAD_TRUNCATED_IMAGES
+            ImageFile.LOAD_TRUNCATED_IMAGES = True
+            try:
+                image = Image.open(str(file_path))
+                image.load()
+                logs.append(f"警告: {Path(file_path).name} 文件不完整(已截断, 缺少{missing})，已容错加载，图像底部可能存在缺失")
+                return image
+            finally:
+                ImageFile.LOAD_TRUNCATED_IMAGES = prev
+        raise
+
 def process_file(file, output_dir, img_format, quality, compress, height, width,
                 delete_original, adjust_height, adjust_width, sharpness, 
                 preserve_metadata, log, method=None, speed=None, preserve_alpha=False, lossless=False, subsample=None, resample=None):
@@ -68,7 +93,7 @@ def process_file(file, output_dir, img_format, quality, compress, height, width,
     try:
         # 使用 pathlib 处理路径
         file_path = Path(file)
-        image = Image.open(str(file_path))
+        image = safe_open_image(file_path, logs)
         file_name = file_path.name
 
         # 如果是1 BPP黑白图，先转为灰度，避免细节损失
@@ -226,6 +251,7 @@ def run_conversion(input_files, output_dir, img_format, quality, compress, heigh
         log.info(f"使用线程数: {max_workers}")
 
         progress = [None] * total_files
+        warning_count = 0
 
         def file_task(idx, file):
             # 检查暂停/停止
@@ -263,9 +289,12 @@ def run_conversion(input_files, output_dir, img_format, quality, compress, heigh
                 for msg in logs:
                     log.info(msg)
                 progress[idx] = ok
+                # 统计带警告的文件(如截断容错加载)
+                if any("警告:" in msg for msg in logs):
+                    warning_count += 1
                 completed_count = sum(1 for v in progress if v is True)
                 failed_count = sum(1 for v in progress if v is False)
-                progress_label.setText(f"转换失败: {failed_count} 已完成/总数: {completed_count}/{total_files}")
+                progress_label.setText(f"警告:{warning_count} 失败:{failed_count} 已完成/总数:{completed_count}/{total_files}")
                 if ok == 'stopped':
                     log.info("转换被用户终止")
                     break
@@ -541,7 +570,7 @@ class MainWindow(QMainWindow):
 
         progress_layout = QHBoxLayout()
         progress_label_title = QLabel("日志输出:")
-        self.progress_label = QLabel("转换失败: 0 已完成/总数: 0/0")
+        self.progress_label = QLabel("警告:0 失败:0 已完成/总数:0/0")
         self.progress_label.setAlignment(Qt.AlignRight)
         progress_layout.addWidget(progress_label_title)
         progress_layout.addWidget(self.progress_label)
@@ -559,7 +588,7 @@ class MainWindow(QMainWindow):
         self.log.setLevel(logging.INFO)
 
         self.log_emitter = LogEmitter()
-        self.log_emitter.log_message.connect(self.log_output.append)
+        self.log_emitter.log_message.connect(self.append_log_message)
 
         handler = TextHandler(self.log_emitter)
         handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s', datefmt='%H:%M:%S'))
@@ -798,6 +827,21 @@ class MainWindow(QMainWindow):
 
     def clear_log(self):
         self.log_output.clear()
+
+    def append_log_message(self, msg):
+        """追加日志；警告行黄色高亮，错误行红色高亮显示"""
+        if "警告:" in msg:
+            safe_msg = html.escape(msg)
+            self.log_output.append(
+                f'<span style="background-color:#ffe97f; color:#7a5c00; font-weight:bold;">{safe_msg}</span>'
+            )
+        elif "失败" in msg or "错误" in msg or "严重" in msg:
+            safe_msg = html.escape(msg)
+            self.log_output.append(
+                f'<span style="background-color:#ffc7c7; color:#a00000; font-weight:bold;">{safe_msg}</span>'
+            )
+        else:
+            self.log_output.append(html.escape(msg))
 
     def pause_conversion(self):
         """线程安全的暂停/继续控制"""

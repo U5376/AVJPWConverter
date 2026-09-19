@@ -1,7 +1,8 @@
 import os
 import sys
+import re
 import argparse
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageFile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def convert_image(
@@ -19,7 +20,24 @@ def convert_image(
         if not os.path.exists(input_path):
             raise FileNotFoundError(f"输入文件 {input_path} 不存在")
 
-        img = Image.open(input_path)
+        try:
+            img = Image.open(input_path)
+            img.load()  # 强制立即解码，让截断错误在此处暴露
+        except Exception as open_err:
+            if "truncated" in str(open_err).lower():
+                # 文件不完整(截断)，容错加载
+                m = re.search(r'(\d+)\s*bytes', str(open_err))
+                missing = f"{m.group(1)}字节" if m else "未知数量"
+                prev = ImageFile.LOAD_TRUNCATED_IMAGES
+                ImageFile.LOAD_TRUNCATED_IMAGES = True
+                try:
+                    img = Image.open(input_path)
+                    img.load()
+                    print(f"警告: {input_path} 文件不完整(已截断, 缺少{missing})，已容错加载，图像底部可能存在缺失", file=sys.stderr)
+                finally:
+                    ImageFile.LOAD_TRUNCATED_IMAGES = prev
+            else:
+                raise
         
         # 调整大小（保持比例）
         if width or height:
@@ -72,7 +90,7 @@ def convert_image(
         }
     except Exception as e:
         print(f"Error converting {input_path}: {str(e)}", file=sys.stderr)
-        return {'success': False}
+        return {'success': False, 'error': str(e)}
 
 def expand_input_paths(inputs):
     """递归解析输入路径，支持文件列表和嵌套路径"""

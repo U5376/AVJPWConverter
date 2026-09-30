@@ -9,13 +9,14 @@ import pillow_avif  # 副作用注册AVIF编解码器
 import warnings
 from PIL import Image, ImageEnhance, ImageFile
 from send2trash import send2trash
-from PySide6.QtCore import Qt, Signal, QUrl, QObject
+from PySide6.QtCore import Qt, Signal, QUrl, QObject, QEvent
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QDesktopServices, QFont
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QLineEdit, QTextEdit,
     QFileDialog, QVBoxLayout, QWidget, QLabel, QComboBox, QSpinBox,
     QHBoxLayout, QFormLayout, QGroupBox, QTableWidget, QTableWidgetItem,
-    QDialog, QHeaderView, QCheckBox, QGridLayout, QDoubleSpinBox)
+    QDialog, QHeaderView, QCheckBox, QGridLayout, QDoubleSpinBox,
+    QMessageBox)
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import psutil
@@ -557,11 +558,24 @@ class MainWindow(QMainWindow):
         self.stop_event = threading.Event()
         self.clear_input_signal.connect(self.clear_input_line)
         self.save_settings_button = make_btn("保存设置", self.save_settings, 70)
-        self.reset_settings_button = make_btn("重置设置", self.reset_settings, 70)
+        # 重置设置改为下拉框：可选择不同配置，选中即加载该配置；可编辑输入新名以新建配置
+        self.config_combo = QComboBox()
+        self.config_combo.setEditable(True)
+        self.config_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.config_combo.setFixedWidth(70)  # 与原"重置设置"按钮同宽
+        # 弹出列表宽度足够显示完整配置名
+        self.config_combo.view().setMinimumWidth(150)
+        self.config_combo.setToolTip("双击可删除当前选中的配置")
+        self.config_combo.currentIndexChanged.connect(self.load_selected_config)
+        # 双击下拉框内的配置名弹出删除确认
+        self.config_combo.lineEdit().installEventFilter(self)
         self.clear_log_button = make_btn("清空日志", self.clear_log, 70)
-        for btn in [self.convert_button, self.pause_button, self.stop_button,
-                    self.save_settings_button, self.reset_settings_button, self.clear_log_button]:
-            control_layout.addWidget(btn)
+        control_layout.addWidget(self.convert_button)
+        control_layout.addWidget(self.pause_button)
+        control_layout.addWidget(self.stop_button)
+        control_layout.addWidget(self.save_settings_button)
+        control_layout.addWidget(self.config_combo)
+        control_layout.addWidget(self.clear_log_button)
         control_group.setLayout(control_layout)
 
         self.log_output = QTextEdit()
@@ -652,6 +666,13 @@ class MainWindow(QMainWindow):
             self.input_line.setText(";".join(paths))
         elif self.output_line.geometry().contains(drop_pos):
             self.output_line.setText(paths[0])
+
+    def eventFilter(self, obj, event):
+        """拦截下拉框 line edit 的双击事件，触发删除当前所选配置"""
+        if obj is self.config_combo.lineEdit() and event.type() == QEvent.Type.MouseButtonDblClick:
+            self.delete_selected_config()
+            return True  # 消费事件，避免触发默认的单词选中
+        return super().eventFilter(obj, event)
 
     def select_input_files(self):
         input_files, _ = QFileDialog.getOpenFileNames(self, "选择输入文件")
@@ -921,9 +942,90 @@ class MainWindow(QMainWindow):
         file_list_dialog.exec_()
 
     def save_settings(self):
-        """保存当前设置到ini文件，并保存窗口坐标"""
-        # 保存主设置
-        self.config['Main'] = {
+        """保存当前设置到所选配置名对应的 ini 节，并保存窗口坐标"""
+        name = self.config_combo.currentText().strip()
+        if not name:
+            self.log.warning("配置名为空，未保存")
+            return
+        # "重置设置"为下拉框内置保留项，不允许作为配置名保存
+        if name == "重置设置":
+            self.log.warning("不能使用保留名 '重置设置' 作为配置名")
+            return
+        # configparser 节名不允许包含 [ ]，做安全替换
+        safe_name = name.replace('[', '_').replace(']', '_')
+        # 覆盖该节，保留其它节
+        if safe_name in self.config:
+            self.config.remove_section(safe_name)
+        self.config[safe_name] = self.gather_settings_section()
+        # 保存窗口坐标到 [Window]
+        if 'Window' in self.config:
+            self.config.remove_section('Window')
+        self.config['Window'] = {'x': str(self.x()), 'y': str(self.y())}
+        # 始终保证 Default 节存在
+        if 'Default' not in self.config.sections():
+            self.config['Default'] = self.default_settings_dict()
+        with open(self.config_path, 'w', encoding='utf-8') as configfile:
+            self.config.write(configfile)
+        # 刷新下拉框，保留当前选择（新名也会加入）
+        self.refresh_config_combo(keep_current=True, current=safe_name)
+        self.log.info(f"设置已保存到配置 [{safe_name}]，窗口坐标: ({self.x()}, {self.y()})")
+
+    def load_settings(self):
+        """启动时加载所有配置并填充下拉框"""
+        if os.path.exists(self.config_path):
+            self.config.read(self.config_path, encoding='utf-8')
+        # 兼容旧版 [Main] 节：迁移到 [Default]
+        if 'Main' in self.config:
+            if 'Default' not in self.config:
+                main = self.config['Main']
+                defaults = self.default_settings_dict()
+                self.config['Default'] = {k: main.get(k, defaults[k]) for k in defaults}
+            self.config.remove_section('Main')
+        # 保证 Default 节存在
+        if 'Default' not in self.config.sections():
+            self.config['Default'] = self.default_settings_dict()
+        # 填充下拉框
+        self.refresh_config_combo(keep_current=False)
+        # 默认加载 Default 配置
+        self.load_selected_config()
+        # 恢复窗口坐标
+        if 'Window' in self.config:
+            w = self.config['Window']
+            try:
+                x = int(w.get('x', '100'))
+                y = int(w.get('y', '100'))
+                self.move(x, y)
+                self.log.info(f"窗口坐标已恢复到: ({x}, {y})")
+            except Exception as e:
+                self.log.warning(f"窗口坐标恢复失败: {e}")
+        self.log.info("配置文件加载完成")
+
+    def default_settings_dict(self):
+        """返回默认设置字典"""
+        return {
+            'format': 'avif',
+            'quality': '63',
+            'height': '768',
+            'width': '1500',
+            'height_checked': 'True',
+            'width_checked': 'False',
+            'sharpness': '1.0',
+            'delete_original': 'False',
+            'preserve_metadata': 'True',
+            'cpu_threads': str(multiprocessing.cpu_count()),
+            'method': '6',
+            'speed': '4',
+            'preserve_alpha': 'False',
+            'lossless': 'False',
+            'subsample_checked': 'False',
+            'subsample_index': '0',
+            'resample_checked': 'False',
+            'resample_index': '0',
+        }
+
+    def gather_settings_section(self):
+        """从 UI 控件收集当前设置，返回节字典"""
+        return {
             'format': self.format_combo.currentText(),
             'quality': str(self.quality_spin.value()),
             'height': str(self.height_spin.value()),
@@ -944,79 +1046,107 @@ class MainWindow(QMainWindow):
             'resample_checked': str(self.resample_checkbox.isChecked()),
             'resample_index': str(self.resample_combo.currentIndex()),
         }
-        # 保存窗口坐标
-        x = self.x()
-        y = self.y()
-        self.config['Window'] = {
-            'x': str(x),
-            'y': str(y)
-        }
+
+    def apply_settings_section(self, section):
+        """将一个设置字典应用到 UI 控件"""
+        if not section:
+            return
+        defaults = self.default_settings_dict()
+        fmt = section.get('format', defaults['format'])
+        idx = self.format_combo.findText(fmt)
+        if idx >= 0:
+            self.format_combo.setCurrentIndex(idx)
+        self.quality_spin.setValue(int(section.get('quality', defaults['quality'])))
+        self.height_spin.setValue(int(section.get('height', defaults['height'])))
+        self.width_spin.setValue(int(section.get('width', defaults['width'])))
+        self.height_checkbox.setChecked(section.get('height_checked', defaults['height_checked']) == 'True')
+        self.width_checkbox.setChecked(section.get('width_checked', defaults['width_checked']) == 'True')
+        self.sharpness_spin.setValue(float(section.get('sharpness', defaults['sharpness'])))
+        self.delete_original_checkbox.setChecked(section.get('delete_original', defaults['delete_original']) == 'True')
+        self.preserve_metadata_checkbox.setChecked(section.get('preserve_metadata', defaults['preserve_metadata']) == 'True')
+        cpu_text = section.get('cpu_threads', defaults['cpu_threads'])
+        cpu_idx = self.cpu_combo.findText(cpu_text)
+        if cpu_idx >= 0:
+            self.cpu_combo.setCurrentIndex(cpu_idx)
+        self.method_combo.setCurrentText(section.get('method', defaults['method']))
+        self.speed_combo.setCurrentText(section.get('speed', defaults['speed']))
+        self.preserve_alpha_checkbox.setChecked(section.get('preserve_alpha', defaults['preserve_alpha']) == 'True')
+        self.lossless_checkbox.setChecked(section.get('lossless', defaults['lossless']) == 'True')
+        # 新增色彩子采样和重采样
+        self.subsample_checkbox.setChecked(section.get('subsample_checked', defaults['subsample_checked']) == 'True')
+        self.subsample_combo.setCurrentIndex(int(section.get('subsample_index', defaults['subsample_index'])))
+        self.resample_checkbox.setChecked(section.get('resample_checked', defaults['resample_checked']) == 'True')
+        self.resample_combo.setCurrentIndex(int(section.get('resample_index', defaults['resample_index'])))
+
+    def refresh_config_combo(self, keep_current=True, current=None):
+        """刷新下拉框中的配置名列表"""
+        self.config_combo.blockSignals(True)
+        prev = current if current is not None else self.config_combo.currentText()
+        self.config_combo.clear()
+        sections = [s for s in self.config.sections() if s != 'Window']
+        if 'Default' in sections:
+            sections.remove('Default')
+        sections.insert(0, 'Default')
+        self.config_combo.addItems(sections)
+        # 末尾加分隔符 + "重置设置"项，作为内置的恢复默认入口
+        self.config_combo.insertSeparator(self.config_combo.count())
+        self.config_combo.addItem("重置设置")
+        if keep_current and prev and prev != "重置设置" and self.config_combo.findText(prev) >= 0:
+            self.config_combo.setCurrentText(prev)
+        else:
+            self.config_combo.setCurrentText('Default')
+        self.config_combo.blockSignals(False)
+
+    def load_selected_config(self, *args):
+        """加载下拉框当前选中的配置到 UI；选中"重置设置"则恢复默认"""
+        name = self.config_combo.currentText().strip()
+        if not name:
+            return
+        # 末尾的"重置设置"项：恢复出厂默认参数（不清空输入/输出路径）
+        if name == "重置设置":
+            self.apply_settings_section(self.default_settings_dict())
+            # 清空下拉框文本，避免误显示为"重置设置"且防止误保存到该保留名
+            self.config_combo.blockSignals(True)
+            self.config_combo.setEditText('')
+            self.config_combo.blockSignals(False)
+            self.log.info("设置已重置为默认值")
+            return
+        if name in self.config:
+            section = self.config[name]
+            defaults = self.default_settings_dict()
+            merged = {k: section.get(k, defaults[k]) for k in defaults}
+        else:
+            merged = self.default_settings_dict()
+        self.apply_settings_section(merged)
+        self.log.info(f"已加载配置: {name}")
+
+    def delete_selected_config(self):
+        """删除下拉框当前选中的配置（带确认）；Default 不允许删除"""
+        name = self.config_combo.currentText().strip()
+        if not name:
+            return
+        if name == 'Default':
+            QMessageBox.warning(self, "无法删除", "Default 配置不可删除")
+            return
+        if name not in self.config:
+            # 输入了新名但尚未保存，仅清空下拉框文本即可
+            self.config_combo.setEditText('')
+            self.log.info(f"已清空未保存的配置名: {name}")
+            return
+        reply = QMessageBox.question(
+            self, "确认删除",
+            f"确定要删除配置 [{name}] 吗？此操作不可撤销。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.config.remove_section(name)
         with open(self.config_path, 'w', encoding='utf-8') as configfile:
             self.config.write(configfile)
-        self.log.info(f"设置已保存到 settings.ini，窗口坐标: ({x}, {y})")
-
-    def load_settings(self):
-        """加载ini文件设置，并恢复窗口坐标"""
-        if not os.path.exists(self.config_path):
-            return
-        self.config.read(self.config_path, encoding='utf-8')
-        if 'Main' in self.config:
-            s = self.config['Main']
-            fmt = s.get('format', 'avif')
-            idx = self.format_combo.findText(fmt)
-            if idx >= 0:
-                self.format_combo.setCurrentIndex(idx)
-            self.quality_spin.setValue(int(s.get('quality', self.quality_spin.value())))
-            self.height_spin.setValue(int(s.get('height', self.height_spin.value())))
-            self.width_spin.setValue(int(s.get('width', self.width_spin.value())))
-            self.height_checkbox.setChecked(s.get('height_checked', 'True') == 'True')
-            self.width_checkbox.setChecked(s.get('width_checked', 'False') == 'True')
-            self.sharpness_spin.setValue(float(s.get('sharpness', self.sharpness_spin.value())))
-            self.delete_original_checkbox.setChecked(s.get('delete_original', 'False') == 'True')
-            self.preserve_metadata_checkbox.setChecked(s.get('preserve_metadata', 'True') == 'True')
-            cpu_idx = self.cpu_combo.findText(s.get('cpu_threads', self.cpu_combo.currentText()))
-            if cpu_idx >= 0:
-                self.cpu_combo.setCurrentIndex(cpu_idx)
-            self.method_combo.setCurrentText(s.get('method', '6'))
-            self.speed_combo.setCurrentText(s.get('speed', '4'))
-            self.preserve_alpha_checkbox.setChecked(s.get('preserve_alpha', 'False') == 'True')
-            self.lossless_checkbox.setChecked(s.get('lossless', 'False') == 'True')
-            # 新增色彩子采样和重采样
-            self.subsample_checkbox.setChecked(s.get('subsample_checked', 'False') == 'True')
-            self.subsample_combo.setCurrentIndex(int(s.get('subsample_index', '0')))
-            self.resample_checkbox.setChecked(s.get('resample_checked', 'False') == 'True')
-            self.resample_combo.setCurrentIndex(int(s.get('resample_index', '0')))
-        # 恢复窗口坐标
-        if 'Window' in self.config:
-            w = self.config['Window']
-            try:
-                x = int(w.get('x', '100'))
-                y = int(w.get('y', '100'))
-                self.move(x, y)
-                self.log.info(f"窗口坐标已恢复到: ({x}, {y})")
-            except Exception as e:
-                self.log.warning(f"窗口坐标恢复失败: {e}")
-        self.log.info("设置已从 settings.ini 加载")
-
-    def reset_settings(self):
-        """重置为默认设置"""
-        self.input_line.clear()
-        self.output_line.clear()
-        self.format_combo.setCurrentText('avif')
-        self.quality_spin.setValue(63)
-        self.height_spin.setValue(768)
-        self.width_spin.setValue(1500)
-        self.height_checkbox.setChecked(True)
-        self.width_checkbox.setChecked(False)
-        self.sharpness_spin.setValue(1.0)
-        self.delete_original_checkbox.setChecked(False)
-        self.preserve_metadata_checkbox.setChecked(True)
-        self.cpu_combo.setCurrentText(str(multiprocessing.cpu_count()))
-        self.method_combo.setCurrentText("6")
-        self.speed_combo.setCurrentText("4")
-        self.preserve_alpha_checkbox.setChecked(False)
-        self.lossless_checkbox.setChecked(False)
-        self.log.info("设置已重置为默认值")
+        self.refresh_config_combo(keep_current=False)
+        self.load_selected_config()
+        self.log.info(f"配置 [{name}] 已删除")
 
 if __name__ == "__main__":
     app = QApplication([])
